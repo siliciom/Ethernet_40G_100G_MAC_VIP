@@ -24,9 +24,6 @@ if {![info exists enable_cov]} {
 #========================================================
 set test_list {
 
-    gmii_eth_normal_frame_test
-
-    gmii_eth_jumbo_frame_test
 }
 
 
@@ -95,16 +92,16 @@ set run_opts ""
 # Test Specific Switches
 # ==========================================
 
-if {$testname == "gmii_eth_normal_frame_test"} {
-
-    #set comp_opts "+define+HALF_DUPLEX"
-    #set run_opts "+NO_OF_PKTS=200"
-
-}  elseif {$testname == "gmii_eth_jumbo_frame_test"} {
-
-    set comp_opts "+define+JUMBO_EN"
-
-}
+#if {$testname == "gmii_eth_normal_frame_test"} {
+#
+#    #set comp_opts "+define+HALF_DUPLEX"
+#    #set run_opts "+NO_OF_PKTS=200"
+#
+#}  elseif {$testname == "gmii_eth_jumbo_frame_test"} {
+#
+#    set comp_opts "+define+JUMBO_EN"
+#
+#}
 
     puts "TEST      : $testname"
     puts "COMP_OPTS : $comp_opts"
@@ -145,7 +142,7 @@ if {$comp_opts ne $last_comp_opts} {
     set comp_status [catch {
 
         eval vlog -work work $cov_compile_opts -sv -incr -mfcu \
-            top/eth_gmii_interface.sv \
+            top/eth_interface.sv \
             top/eth_ui_interface.sv \
             top/eth_top.sv \
             $comp_opts

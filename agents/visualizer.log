@@ -1,0 +1,12 @@
+# VISUALIZERROOT = 'C:/questasim64_2025.2_1/win64/VisualizerRls'
+# USER = 'L Lavanya'
+# Siemens software version 2025.2_1 (Build on Jun 25 2025)
+# Unpublished work. Copyright 2026 Siemens
+
+# visualizer {+source_file+C:\jan\ETHERNET\ethernet_1gbps\agents\eth_mon.sv}
+# Window layout 'Default' saved in file: C:/Users/L Lavanya/.visualizer/layout.xml
+# Start  : Mon Jun  8 15:04:16 2026
+# End    : Mon Jun  8 15:04:28 2026
+# VMSize : 152633344
+# VMPeak : 154173440
+# MaxRSS : 198414336
