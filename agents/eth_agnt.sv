@@ -28,8 +28,12 @@ class eth_agnt extends uvm_agent;
 
     if(!uvm_config_db #(eth_cnfg)::get(this,"","cfg",cfg))
       `uvm_fatal(get_type_name(),"Agent Config Not Found")    
-    else
-      `uvm_info(get_type_name(),"CONNECTION_PASSED",UVM_LOW) 
+    if(!uvm_config_db #(eth_cnfg)::get(this, "", "cfg",cfg)) 
+     `uvm_fatal(get_type_name(), "eth_cnfg not found")
+  
+    uvm_config_db #(eth_cnfg)::set(this,"drv_h","cfg",cfg);
+    uvm_config_db #(eth_cnfg)::set(this,"mon_h","cfg",cfg);
+   
   endfunction  
   
   function void connect_phase(uvm_phase phase);

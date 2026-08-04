@@ -10,8 +10,20 @@ set run_opts ""
 # ==========================================
 
 if {$testname == "eth_normal_frame_test"} {
-
-    #set comp_opts ""
+ 
+    set comp_opts ""
+} elseif {$testname == "eth_multicast_frame_test"} {
+ 
+    set comp_opts "+define+NO_OF_AGENTS=4"
+ 
+ 
+}  elseif {$testname == "eth_jumbo_frame_test"} {
+ 
+    set comp_opts "+define+JUMBO_EN"
+ 
+} elseif {$testname == "eth_broadcast_frame_test"} {
+ 
+    set comp_opts "+define+NO_OF_AGENTS=4"
 }
 
 
@@ -21,6 +33,21 @@ if {$testname == "eth_normal_frame_test"} {
 transcript quietly
 set valid_tests {
     eth_normal_frame_test
+    eth_min_size_frame_test
+    eth_max_size_frame_test
+    eth_error_detection_test
+    eth_bad_fcs_test
+    eth_normal_payload_padding_test
+    eth_single_vlan_tag_frame_test
+    eth_vlan_payload_padding_test
+    eth_runt_frame_test
+    eth_fragment_frame_test
+    eth_jabber_frame_test
+    eth_multicast_frame_test
+    eth_preamble_corruption_test
+    eth_double_vlan_tag_frame_test
+    eth_unicast_frame_test
+    eth_broadcast_frame_test 
 }
 # ==========================================
 # Check whether test is valid
@@ -155,4 +182,5 @@ if {[regexp {UVM_ERROR :\s+[1-9]} $log_data] || \
     puts ""
 } 
 quit -f
+
 

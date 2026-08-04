@@ -18,12 +18,7 @@ class eth_sbscr extends uvm_subscriber#(eth_seq_item);
  
   uvm_analysis_imp_ap_3#(eth_seq_item, eth_sbscr) ai_1[`NO_OF_AGENTS]; 
   uvm_analysis_imp_ap_4#(eth_seq_item, eth_sbscr) ai_2[`NO_OF_AGENTS]; 
-
-  //**************************************************************//
-  // Constructor for the Ethernet subscriber component.
-  // Creates and instantiates all analysis implementation ports
-  // (ai_1 and ai_2) for each configured MAC agent.
-  //**************************************************************//    
+    
   function new(string name = "eth_sbscr", uvm_component parent = null);
     super.new(name,parent);
      foreach(ai_1[i])
@@ -33,33 +28,17 @@ class eth_sbscr extends uvm_subscriber#(eth_seq_item);
       ai_2[i]=new($sformatf ("ai_2[%0d]",i),this);
     
   endfunction   
-
-  //**************************************************************//
-  // This function performs component build operations and allows future
-  // configuration or object creation if required.
-  //**************************************************************//  
+  
   function void build_phase(uvm_phase phase);
     super.build_phase(phase); 
   endfunction    
-
-  //**************************************************************//
-  // Receives Ethernet transactions connected through analysis port 3.
-  // TODO:- Need to implement the logic
-  //**************************************************************//  
+  
   function void write_ap_3(eth_seq_item t);
   endfunction
 
-  //**************************************************************//
-  // Receives Ethernet transactions connected through analysis port 4.
-  // TODO:- Need to implement the logic
-  //**************************************************************//  
   function void write_ap_4(eth_seq_item t);
   endfunction
 
-  //**************************************************************//
-  // Analysis implementation callback for analysis port.
-  // TODO:- Need to implement the logic
-  //**************************************************************//  
   function void write(eth_seq_item t);
   endfunction
 endclass

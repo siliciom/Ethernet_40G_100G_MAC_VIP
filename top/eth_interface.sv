@@ -9,6 +9,7 @@
 //
 //******************************************************************//
 `include "../config/defines.sv"
+`timescale 1ns/1ps
 interface eth_interface (input bit rst);
 
   // Transmit path
@@ -24,22 +25,28 @@ interface eth_interface (input bit rst);
   // Clocking block for driver
   //========================================================
   clocking drv_cb @(posedge TX_CLK);
+    default input #1 output #0;
     output TXD;
     output TXC;
-    input RXD;
-    input RXC;
   endclocking
 
   //========================================================
   // Clocking block for monitor
   //========================================================
-  clocking mon_cb @(negedge TX_CLK);
+  clocking tx_mon_cb @(negedge TX_CLK);
+    default input #1 output #0;
     input TXD;
     input TXC;
+  endclocking
+
+  //========================================================
+  // Clocking block for monitor
+  //========================================================
+  clocking rx_mon_cb @(negedge RX_CLK);
+    default input #1 output #0;
     input RXD;
     input RXC;
   endclocking
-
   //========================================================
   // Modports
   //========================================================
@@ -50,8 +57,10 @@ interface eth_interface (input bit rst);
   
 
   // For UVM monitor
-  modport MON_MP (
-    clocking mon_cb);
+  modport TX_MON_MP (
+    clocking tx_mon_cb);
+  modport RX_MON_MP (
+    clocking rx_mon_cb);
   
 
 endinterface

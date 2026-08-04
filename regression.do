@@ -23,7 +23,22 @@ if {![info exists enable_cov]} {
 # TEST LIST (Add all the Tests)
 #========================================================
 set test_list {
-
+    eth_normal_frame_test
+    eth_min_size_frame_test
+    eth_max_size_frame_test
+    eth_error_detection_test
+    eth_bad_fcs_test
+    eth_normal_payload_padding_test
+    eth_single_vlan_tag_frame_test
+    eth_vlan_payload_padding_test
+    eth_runt_frame_test
+    eth_fragment_frame_test
+    eth_jabber_frame_test
+    eth_multicast_frame_test
+    eth_preamble_corruption_test
+    eth_double_vlan_tag_frame_test
+    eth_unicast_frame_test
+    eth_broadcast_frame_test 
 }
 
 
@@ -92,16 +107,22 @@ set run_opts ""
 # Test Specific Switches
 # ==========================================
 
-#if {$testname == "gmii_eth_normal_frame_test"} {
-#
-#    #set comp_opts "+define+HALF_DUPLEX"
-#    #set run_opts "+NO_OF_PKTS=200"
-#
-#}  elseif {$testname == "gmii_eth_jumbo_frame_test"} {
-#
-#    set comp_opts "+define+JUMBO_EN"
-#
-#}
+if {$testname == "eth_normal_frame_test"} {
+ 
+    set comp_opts ""
+} elseif {$testname == "eth_multicast_frame_test"} {
+ 
+    set comp_opts "+define+NO_OF_AGENTS=4"
+ 
+ 
+}  elseif {$testname == "eth_jumbo_frame_test"} {
+ 
+    set comp_opts "+define+JUMBO_EN"
+ 
+} elseif {$testname == "eth_broadcast_frame_test"} {
+ 
+    set comp_opts "+define+NO_OF_AGENTS=4"
+}
 
     puts "TEST      : $testname"
     puts "COMP_OPTS : $comp_opts"
@@ -206,6 +227,7 @@ set sim_status [catch {
         -debugDB \
         -voptargs=+acc \
         work.eth_top \
+        +UVM_VERBOSITY=UVM_NONE \
         +UVM_TESTNAME=$testname \
         -l $logfile \
         -sv_seed $seed \
@@ -336,7 +358,3 @@ quit -f
 
 #======================================================================================================
 #======================================================================================================
-
-
-
-
