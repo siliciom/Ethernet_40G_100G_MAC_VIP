@@ -19,8 +19,9 @@ class eth_env extends uvm_env;
   
   eth_virtual_seqr vseqr_h;
   eth_seq_item seq_item_h;
-  //eth_pause_checker pause_h;
-  
+  eth_pause_checker pause_h;
+  eth_ipg_checker ipg_chkr_h;   
+
   function new(string name = "eth_env", uvm_component parent = null);
     super.new(name,parent);
     agnt_mac = new[`NO_OF_AGENTS];
@@ -39,8 +40,9 @@ class eth_env extends uvm_env;
       sbscr_h = eth_sbscr::type_id::create("sbscr_h",this);
       seq_item_h = eth_seq_item::type_id::create("seq_item_h"); 
       vseqr_h = eth_virtual_seqr::type_id::create("vseqr_h",this);
-      //pause_h = eth_pause_checker::type_id::create("pause_h",this);
-      
+      pause_h = eth_pause_checker::type_id::create("pause_h",this);
+      ipg_chkr_h = eth_ipg_checker::type_id::create("ipg_chkr_h",this);
+       
   endfunction
   
   function void connect_phase(uvm_phase phase);

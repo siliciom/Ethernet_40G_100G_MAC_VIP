@@ -23,7 +23,7 @@ if {![info exists enable_cov]} {
 # TEST LIST (Add all the Tests)
 #========================================================
 set test_list {
-    eth_normal_frame_test
+  eth_normal_frame_test
     eth_min_size_frame_test
     eth_max_size_frame_test
     eth_error_detection_test
@@ -38,7 +38,21 @@ set test_list {
     eth_preamble_corruption_test
     eth_double_vlan_tag_frame_test
     eth_unicast_frame_test
-    eth_broadcast_frame_test 
+    eth_broadcast_frame_test
+    eth_double_vlan_payload_padding_test
+    eth_len_payload_mismatch_test
+    eth_oversize_frame_test
+    eth_invalid_control_character_test
+    eth_start_character_in_between_payload_err_test
+    eth_end_character_in_between_payload_err_test
+    eth_missing_terminate_character_test
+    eth_control_char_data_mismatch_test
+    eth_pause_frame_basic_xoff_xon_test
+    eth_simultaneous_pause_frame_test
+    eth_pause_frame_during_vlan_traffic_test
+    eth_pause_frame_with_updated_pause_time
+    eth_pause_reserved_opcode_test
+ 
 }
 
 

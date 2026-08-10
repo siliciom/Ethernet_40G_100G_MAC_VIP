@@ -64,6 +64,7 @@ class eth_seq_item extends uvm_sequence_item;
   bit [11:0]  outer_VID;
 
   bit invalid;
+  bit jumbo_en;;
 
   //error_fields
   bit corrupt_fcs_en;

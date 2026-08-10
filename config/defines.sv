@@ -10,9 +10,9 @@
 //
 //******************************************************************//
 `define NO_OF_AGENTS 2
-`define DATA_WIDTH 256
-`define CTRL_WIDTH 32
-`define FREQ_IN_MHZ 390.625
+`define DATA_WIDTH 64
+`define CTRL_WIDTH 8
+`define FREQ_IN_MHZ 625
 `define START_CH 8'hFB
 `define TERMINATE_CH 8'hFD
 `define IDLE_CH 8'h07
@@ -30,7 +30,6 @@
 `define RESET_PERIOD 5
 `define NUM_LANES = `DATA_WIDTH / 8;
 `define NO_OF_PKTS 1000
-
 
 typedef enum {
   NORMAL_FRAME,

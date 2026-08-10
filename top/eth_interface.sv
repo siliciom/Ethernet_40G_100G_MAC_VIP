@@ -34,7 +34,7 @@ interface eth_interface (input bit rst);
   // Clocking block for monitor
   //========================================================
   clocking tx_mon_cb @(negedge TX_CLK);
-    default input #1 output #0;
+   // default input #1 output #0;
     input TXD;
     input TXC;
   endclocking
@@ -43,7 +43,7 @@ interface eth_interface (input bit rst);
   // Clocking block for monitor
   //========================================================
   clocking rx_mon_cb @(negedge RX_CLK);
-    default input #1 output #0;
+    //default input #1 output #0;
     input RXD;
     input RXC;
   endclocking

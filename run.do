@@ -47,7 +47,21 @@ set valid_tests {
     eth_preamble_corruption_test
     eth_double_vlan_tag_frame_test
     eth_unicast_frame_test
-    eth_broadcast_frame_test 
+    eth_broadcast_frame_test
+    eth_double_vlan_payload_padding_test
+    eth_len_payload_mismatch_test
+    eth_oversize_frame_test
+    eth_invalid_control_character_test
+    eth_start_character_in_between_payload_err_test
+    eth_end_character_in_between_payload_err_test
+    eth_missing_terminate_character_test
+    eth_control_char_data_mismatch_test
+    eth_pause_frame_basic_xoff_xon_test
+    eth_simultaneous_pause_frame_test
+    eth_pause_frame_during_vlan_traffic_test
+    eth_pause_frame_with_updated_pause_time
+    eth_pause_reserved_opcode_test
+     
 }
 # ==========================================
 # Check whether test is valid
@@ -90,6 +104,28 @@ puts "Running Test      : $testname"
 puts "Compile Switches : $comp_opts"
 puts "Run Switches     : $run_opts"
 puts "================================="
+
+##=========================================
+## Seed Handling
+##=========================================
+#if {![info exists seed]} {
+#    set seed [expr {int(rand()*1000000)}]
+#}
+#
+#
+## ==========================================
+## Log/Wave files
+## ==========================================
+#file mkdir sim/$testname/seed_$seed
+#set complog "./sim/$testname/seed_$seed/comp.log"
+#set logfile "./sim/$testname/seed_$seed/${testname}.log"
+#set qwavefile "./sim/$testname/seed_$seed/qwave.db"
+#set wavefile "./sim/$testname/seed_$seed/${testname}.wlf"
+#
+#
+#puts "================================="
+#puts "Seed : $seed"
+#puts "================================="
 
 # ==========================================
 # Library

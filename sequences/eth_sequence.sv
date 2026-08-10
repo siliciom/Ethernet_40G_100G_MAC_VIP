@@ -37,7 +37,8 @@ class base_seq extends uvm_sequence #(eth_seq_item);
   bit [2:0] outer_PCP;
   bit outer_DEI;
   bit [11:0] outer_VID;
-  bit [15:0] outer_TPID; 
+  bit [15:0] outer_TPID;
+  bit jumbo_en; 
 
   // RS layer error configuration
   bit start_char;
@@ -47,6 +48,26 @@ class base_seq extends uvm_sequence #(eth_seq_item);
   int start_offset;
   int end_offset;
   int data_txc_offset;
+
+  //pause
+  bit pause_frame_en;
+  bit [15:0] pause_opc;
+  bit [15:0] pause_time;
+  bit pause_sel;
+  bit pause_rsd_en;
+
+  //pfc
+  bit pfc_frame_en;
+  bit [15:0] priority_en_vector;
+  bit [15:0] pfc_pause_time[8];
+  bit pfc_sel;
+  int temp_pcp;
+  bit basic_pfc_en;
+  bit pfc_rand_pri_en;
+  bit force_pcp_en;
+  bit [2:0]force_pcp;
+  bit pfc_overlap_en;
+
 
 
   //------------------------------------------------------------------------------
@@ -131,6 +152,9 @@ class eth_normal_frame_seq extends base_seq;
     if(this.data_txc_offset)
       req.data_txc_offset = 1;
 
+    if(this.jumbo_en)
+      req.jumbo_en = 1;
+
     if(this.vlan_en) begin
       req.vlan_en = this.vlan_en;
       req.TPID    = this.TPID;
@@ -147,6 +171,31 @@ class eth_normal_frame_seq extends base_seq;
       req.outer_DEI      = this.outer_DEI;
       req.outer_PCP      = this.outer_PCP;
     end
+
+    if(pause_sel) begin
+       req.pause_frame_en = 1;
+       req.vlan_en      = 0;
+       req.pause_opc      = 16'h0001;
+       req.ether_type     = 16'h8808;
+       req.pause_time     = this.pause_time;
+       if($urandom_range(0,1))
+	 req.da           = 48'h0180c2000001;
+         if(this.pause_rsd_en) 
+          req.pause_opc      = $urandom_range(2,4);
+    end
+
+    if(pfc_sel) begin
+      req.pfc_frame_en = 1;
+      req.pause_opc    = 16'h0101;
+      if($urandom_range(0,1))
+        req.da             = 48'h0180c2000001;
+      req.vlan_en      = 0;
+      req.ether_type   = 16'h8808;
+      req.priority_en_vector=this.priority_en_vector;
+        for(int i=0;i<8;i++) 
+          req.pfc_pause_time[i]= this.pfc_pause_time[i];  
+    end
+
 
     finish_item(req);
   endtask

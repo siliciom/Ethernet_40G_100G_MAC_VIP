@@ -23,7 +23,7 @@ class eth_max_size_frame_test extends eth_base_test;
       vseq.ether_type = 1500;
       vseq.payload_rand_en = 0;
       vseq.start(env_h.vseqr_h);
-    #200;
+    #500;
     phase.drop_objection(this);
   endtask  
 endclass

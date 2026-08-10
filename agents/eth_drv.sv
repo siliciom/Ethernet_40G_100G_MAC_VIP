@@ -24,13 +24,17 @@ class eth_drv extends uvm_driver#(eth_seq_item);
   int idx;
   logic [`DATA_WIDTH-1:0] tx_word;
   int tx_idx;
- int deficit_cnt = 0;
- //int ipg_bytes;
- //int pad;
- //int actual_idle;
- int pad_cnt;
- 
- bit [`MAC_ADDR-1:0] mac_addr;
+  int deficit_cnt = 0;
+  bit frame_in_progress = 0;
+  int PAUSE_QUANTA_CYCLES;
+  int fd_lane;
+  int pad_within_word;
+  int pad_cnt;
+  bit [`MAC_ADDR-1:0] mac_addr;
+  eth_seq_item pause_hold_q[$];
+  bit pause_drain_in_progress=0;
+  semaphore tx_sem;
+
   
   typedef struct packed {
     logic [`DATA_WIDTH-1:0] txd;
@@ -54,7 +58,8 @@ xlgmii_word_t xlgmii_q[$];
     
     if(!uvm_config_db #(eth_cnfg)::get(this,"","cfg",cfg))
        `uvm_fatal(get_type_name(),"No cfg")
- 
+    PAUSE_QUANTA_CYCLES = (512 / $bits(v_intf.drv_cb.TXD)); 
+    tx_sem = new(1);  
     
   endfunction    
 
@@ -66,22 +71,43 @@ task run_phase(uvm_phase phase);
     drive_reset();
     reset_counters();
     wait(v_intf.rst);
-    // repeat($urandom_range(3,5)) begin
         send_idle();
-	repeat($urandom_range(3,5)) @(v_intf.drv_cb);
-     //end
+	repeat($urandom_range(1,5)) @(v_intf.drv_cb);
       	fork
 	update_counters();
+	pause_timer();
+       	drain_pause_queue();;
         join_none
 
     forever begin
+	wait(statistics::pause_flag[mac_addr]==0);
+
         seq_item_port.get_next_item(tr);
-        frame_pack(tr);
-        rs_encode();
-        drive_frame();
-	eth_packet_tracker::print_packet("TX",this.get_full_name(),tr);
-        seq_item_port.item_done();
-    end
+	if(statistics::pause_flag[mac_addr]) begin
+	  pause_hold_q.push_back(tr);
+          `uvm_info("PAUSE_HOLD_Q",
+                   $sformatf("mac_addr=%h frame queued during pause, size=%0d", mac_addr, pause_hold_q.size()),UVM_LOW)
+          tx_sem.put(1);
+        end
+        else begin
+          tx_sem.get(1);
+          //wait_for_drain_complete(.hold_sem(1));
+	  if(statistics::pause_flag[mac_addr]) begin        
+	    pause_hold_q.push_back(tr);
+	    `uvm_info("Re_PAUSE_HOLD_Q",$sformatf("mac=%h re-queued after sem grant",mac_addr),UVM_LOW)
+	    tx_sem.put(1);
+	  end
+	  else begin
+	    frame_pack(tr);
+	    rs_encode();
+	    drive_frame();
+	    send_dic_idle(); 
+	    eth_packet_tracker::print_packet("TX",this.get_full_name(),tr);
+	    tx_sem.put(1);
+          end
+       end 
+        seq_item_port.item_done();  
+      end
 endtask
 
   //**********************************************************//
@@ -92,6 +118,94 @@ endtask
     v_intf.drv_cb.TXD  <= 0;
     v_intf.drv_cb.TXC  <= 0;
   endtask
+
+   //**********************************************************//
+  // Waits for the monitor to raise pause_flag (i.e. a valid
+  // PAUSE frame with PV was received), waits until any frame
+  // currently on the wire finishes, then drives continuous
+  // XLGMII idle for PV * PAUSE_QUANTA_CYCLES clock cycles.
+  // If PV is updated while waiting (e.g. XON, PV=0), reloads
+  // immediately so TX resumes without waiting out the old PV.
+  //**********************************************************//
+  task pause_timer();
+    int local_pause_cycles;
+    int prev_pause_value;
+    bit pause_started;
+    forever begin
+      wait(statistics::pause_flag[mac_addr] == 1);
+       @(v_intf.drv_cb);
+      `uvm_info("A1111111AAAAAAAA",$sformatf("pause_flag=%d",statistics::pause_flag[mac_addr]),UVM_LOW)
+      wait(frame_in_progress == 0);
+      `uvm_info("AAAAAAAAA",$sformatf("pause_flag=%d",statistics::pause_flag[mac_addr]),UVM_LOW)
+      prev_pause_value   = statistics::pause_value[mac_addr];
+      local_pause_cycles = prev_pause_value * PAUSE_QUANTA_CYCLES;
+      pause_started=1;
+      //statistics::pause_update[mac_addr] = 0;
+
+      `uvm_info("PAUSE_DBG", $sformatf("mac=%0d PV=%0d cycles=%0d",
+                mac_addr[7:0], prev_pause_value, local_pause_cycles), UVM_LOW)
+
+      while(local_pause_cycles > 0) begin
+	@(v_intf.drv_cb);
+        v_intf.drv_cb.TXD <= {8{`IDLE_CH}};
+        v_intf.drv_cb.TXC <= 8'hFF;
+        
+
+        if(statistics::pause_update[mac_addr]) begin
+          prev_pause_value   = statistics::pause_value[mac_addr];
+          local_pause_cycles = prev_pause_value * PAUSE_QUANTA_CYCLES;
+          pause_started=1;
+          statistics::pause_update[mac_addr] = 0;
+          `uvm_info("PAUSE_UPDATE", $sformatf("New PV=%0d -> cycles=%0d",
+                    prev_pause_value, local_pause_cycles), UVM_LOW)
+        end
+	// if(pause_started) begin
+	//	   `uvm_info("PAUSE_CYCLES",$sformatf("pause_cycles=%0d",local_pause_cycles),UVM_LOW)
+	//	   pause_started=0;
+	//	   continue;
+	//	 end 
+        
+      //`uvm_info("PAUSE_CYCLES",$sformatf("pause_cycles=%0d",local_pause_cycles),UVM_LOW)
+                
+		 local_pause_cycles--;
+            `uvm_info("PAUSE_CYCLES",$sformatf("pause_cycles=%0d",local_pause_cycles),UVM_LOW)
+        end
+      statistics::pause_flag[mac_addr] = 0;
+      	      `uvm_info("PAUSE", $sformatf("TX Resume mac_id=%0d", mac_addr[7:0]), UVM_LOW)
+      end
+  endtask
+
+
+  task drain_pause_queue();
+    forever begin
+    eth_seq_item local_tr;
+    wait(pause_hold_q.size() > 0);
+    wait(statistics::pause_flag[mac_addr] == 0);
+    pause_drain_in_progress = 1;
+    `uvm_info("PAUSE_DRAIN_START",$sformatf("mac=%h frames=%0d", mac_addr, pause_hold_q.size()), UVM_LOW)
+ 
+    while(pause_hold_q.size() > 0) begin
+      tx_sem.get(1);
+      if(statistics::pause_flag[mac_addr]) begin
+        tx_sem.put(1);
+        `uvm_info("PAUSE_REBLOCK","pause reasserted mid-drain",UVM_LOW)
+        break;                          
+      end
+      local_tr = pause_hold_q.pop_front();
+      frame_pack(local_tr);
+     // retry_q = frame_q;
+      drive_frame();
+      tx_sem.put(1);
+    end
+ 
+    if(pause_hold_q.size() == 0) begin
+      pause_drain_in_progress = 0;
+      `uvm_info("PAUSE_DRAIN_DONE","all held frames sent",UVM_LOW)
+    end
+   end
+  endtask
+ 
+
 
   //**********************************************************//
   // This task packs an eth_seq_item transaction into frame_q
@@ -135,6 +249,20 @@ endtask
     //Type/Length packing
     frame_q[idx++] = tr.ether_type[15:8];    
     frame_q[idx++] = tr.ether_type[7:0];
+
+    //Pause frame packing 
+   if(tr.pause_frame_en ) begin
+     frame_q[idx++] = tr.pause_opc[15:8];
+     frame_q[idx++] = tr.pause_opc[7:0];
+     frame_q[idx++] = tr.pause_time[15:8];
+     frame_q[idx++] = tr.pause_time[7:0];
+      for(int i = 0; i< 42;i++)
+          frame_q[idx++] = 0;
+	`uvm_info("DRIVING DATA", $sformatf("pause_frame_en=%0b,da=%p,sa=%p,type=%0h,opcode=%0h,payload=%0d,Frame size = %0d",
+	      tr.pause_frame_en,tr.da,tr.sa,tr.ether_type,tr.pause_opc,tr.payload.size(),idx),UVM_LOW)
+   end
+  else begin
+
     //Payload packing
       for(int i = (tr.payload.size()- 1);i >= 0 ;i--)
         frame_q[idx++] = tr.payload[i];
@@ -151,6 +279,7 @@ endtask
        if(tr.payload.size() < pad_cnt && tr.padding_en == 1) begin
         for(int i = tr.payload.size(); i < pad_cnt; i++)
           frame_q[idx++] = 0;
+      end
       end
       
     //CRC packing
@@ -203,11 +332,7 @@ task rs_encode();
     xlgmii_word_t word;
     int idx;
     int bytes_used_in_word;
-    int fd_lane;
-    int pad_within_word;
-    int natural_idle;
-    int surplus;
-    int shortfall;
+    
 
     rs_frame.delete();
     rs_ctrl.delete();
@@ -258,55 +383,6 @@ task rs_encode();
     end
 
     //--------------------------------------------------
-    // 6. Mandatory one full idle word so next frame's
-    //    FB starts at lane0 of a fresh word
-    //--------------------------------------------------
-    if(pad_within_word<5) begin
-    repeat(NUM_LANES) begin
-        rs_frame.push_back(`IDLE_CH);
-        rs_ctrl.push_back(1);
-    end
-
-    natural_idle = pad_within_word+NUM_LANES;
-  end
-  else begin
-      natural_idle = pad_within_word;
-
-  end
-
-    //--------------------------------------------------
-    // 7. Deficit Idle Count bookkeeping
-    //--------------------------------------------------
-    if (natural_idle >= 12) begin
-        surplus = natural_idle - 12;
-        if (deficit_cnt > 0) begin
-            if (surplus >= deficit_cnt) begin
-                surplus     = surplus - deficit_cnt; // fully repay
-                deficit_cnt = 0;
-            end else begin
-                deficit_cnt = deficit_cnt - surplus; // partial repay
-                surplus     = 0;
-            end
-        end
-        // remaining surplus (if any) is simply not banked further
-    end
-    else begin
-        shortfall   = 12 - natural_idle;
-        deficit_cnt = deficit_cnt + shortfall;
-       if (deficit_cnt > 7) begin
-            repeat(NUM_LANES) begin
-                rs_frame.push_back(`IDLE_CH);
-                rs_ctrl.push_back(1);
-            end
-            deficit_cnt  = deficit_cnt - 8;
-            natural_idle = natural_idle + 8;   // reflect actual IPG sent
-	    `uvm_info("DIC_OVERFLOW", $sformatf(" Inserted extra 8-byte idle word DEFICIT_CNT reduced to %0d", deficit_cnt), UVM_LOW)
-        end
-    end
-    
-   `uvm_info("FD_LANE_INFO",  $sformatf("FD_LANE=%0d NATURAL_IDLE=%0d DEFICIT_CNT=%0d",fd_lane, natural_idle,  deficit_cnt),UVM_LOW)
-
-    //--------------------------------------------------
     // 8. Convert to XLGMII words
     //--------------------------------------------------
     idx = 0;
@@ -329,12 +405,73 @@ task rs_encode();
 
         `uvm_info(get_type_name(), "Driving INVALID ctrl char=0x1E at word=0 lane=0", UVM_LOW)
     end
-
-
-
-
-   
 endtask
+
+  //**********************************************************//
+// This task computes and drives the mandatory/DIC idle
+// words that follow a frame, per the Deficit Idle Count
+// algorithm. Kept separate from rs_encode()/drive_frame()
+// so pause can preempt it without waiting for the full
+// IPG idle to complete.
+//**********************************************************//
+task send_dic_idle();
+  int natural_idle;
+  int surplus, shortfall;
+  int extra_words;
+
+  //--------------------------------------------------
+  // 6. Mandatory one full idle word so next frame's
+  //    FB starts at lane0 of a fresh word
+  //--------------------------------------------------
+  if(pad_within_word < 5) begin
+    natural_idle = pad_within_word+NUM_LANES;
+    extra_words  = 1;
+  end
+  else begin
+    natural_idle = pad_within_word;
+    extra_words  = 0;
+  end
+
+  //--------------------------------------------------
+  // 7. Deficit Idle Count
+  //--------------------------------------------------
+  if(natural_idle >= 12) begin
+    surplus = natural_idle - 12;
+    if(deficit_cnt > 0) begin
+      if(surplus >= deficit_cnt) begin
+        surplus     = surplus - deficit_cnt;
+        deficit_cnt = 0;
+      end
+      else begin
+        deficit_cnt = deficit_cnt - surplus;
+        surplus     = 0;
+      end
+    end
+  end
+  else begin
+    shortfall   = 12 - natural_idle;
+    deficit_cnt = deficit_cnt + shortfall;
+    if(deficit_cnt > 7) begin
+      extra_words++;
+      deficit_cnt  = deficit_cnt - 8;
+      natural_idle = natural_idle + 8;
+      `uvm_info("DIC_OVERFLOW", $sformatf(" Inserted extra 8-byte idle word DEFICIT_CNT reduced to %0d", deficit_cnt), UVM_LOW)
+    end
+  end
+
+  `uvm_info("FD_LANE_INFO", $sformatf("FD_LANE=%0d NATURAL_IDLE=%0d DEFICIT_CNT=%0d",
+            fd_lane, natural_idle, deficit_cnt), UVM_LOW)
+
+  //--------------------------------------------------
+  // 8. Drive the computed idle words onto the bus
+  //--------------------------------------------------
+  for(int i = 0; i <= extra_words; i++) begin
+    @(v_intf.drv_cb);
+    v_intf.drv_cb.TXD <= {8{`IDLE_CH}};
+    v_intf.drv_cb.TXC <= 8'hFF;
+  end
+endtask
+
 
   //**********************************************************//
   // This task drives the encoded XLGMII words onto the
@@ -346,8 +483,21 @@ task drive_frame();
 
     xlgmii_word_t word;
     int byte_cnt = 0;
+    frame_in_progress = 1;
+
 
     foreach(xlgmii_q[i]) begin
+	 @(v_intf.drv_cb);
+        if(i==0) begin
+	   if(statistics::pause_flag[mac_addr]) begin
+          frame_q.delete();
+          frame_in_progress=0;
+          pause_hold_q.push_front(tr);
+          `uvm_info("pppppppppppppppppppppppppppppp","",UVM_LOW)
+           return;
+        end
+	
+	end
         word = xlgmii_q[i];
         for(int lane=0; lane<NUM_LANES; lane++) begin
             // Count only DATA bytes
@@ -365,15 +515,17 @@ task drive_frame();
                    word.txc[lane]       = 1'b1;
 		   `uvm_info("START_IN_PAYLOAD", $sformatf("Inserted START(0xFB) at Word=%0d Lane=%0d Byte=%0d",i, lane, byte_cnt),UVM_LOW)
               end
-
+              // Inject  End character in payload
 	      if(tr.end_char && (byte_cnt == tr.end_offset)) begin
                    word.txd[lane*8 +:8] = `TERMINATE_CH;
                    word.txc[lane]       = 1'b1;
 		   `uvm_info("END_IN_PAYLOAD", $sformatf("Inserted END(0xFD) at Word=%0d Lane=%0d Byte=%0d",i, lane, byte_cnt),UVM_LOW)
               end
-
+             //Sending TXC as High when TXD have DATA 
 	      if(tr.data_txc_error && (byte_cnt == tr.data_txc_offset)) begin
 		      word.txc[lane] = 1'b1;
+		    //  word.txc[lane] =56;
+                   word.txd[lane*8 +:8] = $urandom_range(10,100);
 		      `uvm_info("DATA_TXC_ERROR",$sformatf("Forced TXC=1 for DATA byte at Word=%0d Lane=%0d Byte=%0d Data=0x%02h",i, lane, byte_cnt, word.txd[lane*8 +:8]), UVM_LOW)
 	      end
                 byte_cnt++;
@@ -382,8 +534,9 @@ task drive_frame();
         v_intf.drv_cb.TXD <= word.txd;
         v_intf.drv_cb.TXC <= word.txc;
         tr.tx_trace_q.push_back('{t: $time, txd: word.txd, txc: word.txc});
-        @(v_intf.drv_cb);
-    end
+           end
+	   frame_in_progress = 0;
+
 endtask
 
   //**********************************************************//
@@ -393,156 +546,159 @@ endtask
   // counters.
   //**********************************************************//
 
- task update_counters();
+task update_counters();
     forever begin
        @(v_intf.drv_cb);
-       statistics::v_uif[mac_addr].tx_good_pkt_count      = statistics::tx_good_pkt_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_bad_pkt_count       = statistics::tx_bad_pkt_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_unicast_count       = statistics::tx_unicast_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_multicast_count     = statistics::tx_multicast_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_broadcast_count     = statistics::tx_broadcast_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_fragment_count      = statistics::tx_fragment_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_runt_count          = statistics::tx_runt_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pause_count         = statistics::tx_pause_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_vlan_count          = statistics::tx_vlan_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_jumbo_count         = statistics::tx_jumbo_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_jabber_count        = statistics::tx_jabber_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_ipg_violation_count = statistics::tx_ipg_violation_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xon_count       = statistics::tx_pfc_xon_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xoff_count      = statistics::tx_pfc_xoff_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_carrier_ext_count   = statistics::tx_carrier_ext_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pause_xon_count     = statistics::tx_pause_xon_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pause_xoff_count    = statistics::tx_pause_xoff_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_control_pkt_count   = statistics::tx_control_pkt_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xon_prio0_count = statistics::tx_pfc_xon_prio0_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xon_prio1_count = statistics::tx_pfc_xon_prio1_pending[mac_addr]; 
-       statistics::v_uif[mac_addr].tx_pfc_xon_prio2_count = statistics::tx_pfc_xon_prio2_pending[mac_addr]; 
-       statistics::v_uif[mac_addr].tx_pfc_xon_prio3_count = statistics::tx_pfc_xon_prio3_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xon_prio4_count = statistics::tx_pfc_xon_prio4_pending[mac_addr]; 
-       statistics::v_uif[mac_addr].tx_pfc_xon_prio5_count = statistics::tx_pfc_xon_prio5_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xon_prio6_count = statistics::tx_pfc_xon_prio6_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xon_prio7_count = statistics::tx_pfc_xon_prio7_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xoff_prio0_count= statistics::tx_pfc_xoff_prio0_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xoff_prio1_count= statistics::tx_pfc_xoff_prio1_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xoff_prio2_count= statistics::tx_pfc_xoff_prio2_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xoff_prio3_count= statistics::tx_pfc_xoff_prio3_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xoff_prio4_count= statistics::tx_pfc_xoff_prio4_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xoff_prio5_count= statistics::tx_pfc_xoff_prio5_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xoff_prio6_count= statistics::tx_pfc_xoff_prio6_pending[mac_addr];
-       statistics::v_uif[mac_addr].tx_pfc_xoff_prio7_count= statistics::tx_pfc_xoff_prio7_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_good_pkt_count      <= statistics::tx_good_pkt_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_bad_pkt_count       <= statistics::tx_bad_pkt_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_unicast_count       <= statistics::tx_unicast_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_multicast_count     <= statistics::tx_multicast_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_broadcast_count     <= statistics::tx_broadcast_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_fragment_count      <= statistics::tx_fragment_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_runt_count          <= statistics::tx_runt_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pause_count         <= statistics::tx_pause_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_vlan_count          <= statistics::tx_vlan_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_jumbo_count         <= statistics::tx_jumbo_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_jabber_count        <= statistics::tx_jabber_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_ipg_violation_count <= statistics::tx_ipg_violation_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xon_count       <= statistics::tx_pfc_xon_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xoff_count      <= statistics::tx_pfc_xoff_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_carrier_ext_count   <= statistics::tx_carrier_ext_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pause_xon_count     <= statistics::tx_pause_xon_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pause_xoff_count    <= statistics::tx_pause_xoff_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_control_pkt_count   <= statistics::tx_control_pkt_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xon_prio0_count <= statistics::tx_pfc_xon_prio0_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xon_prio1_count <= statistics::tx_pfc_xon_prio1_pending[mac_addr]; 
+       statistics::v_uif[mac_addr].tx_pfc_xon_prio2_count <= statistics::tx_pfc_xon_prio2_pending[mac_addr]; 
+       statistics::v_uif[mac_addr].tx_pfc_xon_prio3_count <= statistics::tx_pfc_xon_prio3_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xon_prio4_count <= statistics::tx_pfc_xon_prio4_pending[mac_addr]; 
+       statistics::v_uif[mac_addr].tx_pfc_xon_prio5_count <= statistics::tx_pfc_xon_prio5_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xon_prio6_count <= statistics::tx_pfc_xon_prio6_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xon_prio7_count <= statistics::tx_pfc_xon_prio7_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xoff_prio0_count<= statistics::tx_pfc_xoff_prio0_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xoff_prio1_count<= statistics::tx_pfc_xoff_prio1_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xoff_prio2_count<= statistics::tx_pfc_xoff_prio2_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xoff_prio3_count<= statistics::tx_pfc_xoff_prio3_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xoff_prio4_count<= statistics::tx_pfc_xoff_prio4_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xoff_prio5_count<= statistics::tx_pfc_xoff_prio5_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xoff_prio6_count<= statistics::tx_pfc_xoff_prio6_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_pfc_xoff_prio7_count<= statistics::tx_pfc_xoff_prio7_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_drop_count          <= statistics::tx_drop_pending[mac_addr];
 
-
-       statistics::v_uif[mac_addr].rx_good_pkt_count      = statistics::rx_good_pkt_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_bad_pkt_count       = statistics::rx_bad_pkt_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_unicast_count       = statistics::rx_unicast_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_multicast_count     = statistics::rx_multicast_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_broadcast_count     = statistics::rx_broadcast_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_fragment_count      = statistics::rx_fragment_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_runt_count          = statistics::rx_runt_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pause_count         = statistics::rx_pause_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_vlan_count          = statistics::rx_vlan_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_jumbo_count         = statistics::rx_jumbo_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_jabber_count        = statistics::rx_jabber_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_ipg_violation_count = statistics::rx_ipg_violation_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xon_count       = statistics::rx_pfc_xon_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xoff_count      = statistics::rx_pfc_xoff_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_carrier_ext_count   = statistics::rx_carrier_ext_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pause_xon_count     = statistics::rx_pause_xon_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pause_xoff_count    = statistics::rx_pause_xoff_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_control_pkt_count   = statistics::rx_control_pkt_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xon_prio0_count = statistics::rx_pfc_xon_prio0_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xon_prio1_count = statistics::rx_pfc_xon_prio1_pending[mac_addr]; 
-       statistics::v_uif[mac_addr].rx_pfc_xon_prio2_count = statistics::rx_pfc_xon_prio2_pending[mac_addr]; 
-       statistics::v_uif[mac_addr].rx_pfc_xon_prio3_count = statistics::rx_pfc_xon_prio3_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xon_prio4_count = statistics::rx_pfc_xon_prio4_pending[mac_addr]; 
-       statistics::v_uif[mac_addr].rx_pfc_xon_prio5_count = statistics::rx_pfc_xon_prio5_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xon_prio6_count = statistics::rx_pfc_xon_prio6_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xon_prio7_count = statistics::rx_pfc_xon_prio7_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xoff_prio0_count= statistics::rx_pfc_xoff_prio0_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xoff_prio1_count= statistics::rx_pfc_xoff_prio1_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xoff_prio2_count= statistics::rx_pfc_xoff_prio2_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xoff_prio3_count= statistics::rx_pfc_xoff_prio3_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xoff_prio4_count= statistics::rx_pfc_xoff_prio4_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xoff_prio5_count= statistics::rx_pfc_xoff_prio5_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xoff_prio6_count= statistics::rx_pfc_xoff_prio6_pending[mac_addr];
-       statistics::v_uif[mac_addr].rx_pfc_xoff_prio7_count= statistics::rx_pfc_xoff_prio7_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_good_pkt_count      <= statistics::rx_good_pkt_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_bad_pkt_count       <= statistics::rx_bad_pkt_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_unicast_count       <= statistics::rx_unicast_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_multicast_count     <= statistics::rx_multicast_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_broadcast_count     <= statistics::rx_broadcast_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_fragment_count      <= statistics::rx_fragment_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_runt_count          <= statistics::rx_runt_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pause_count         <= statistics::rx_pause_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_vlan_count          <= statistics::rx_vlan_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_jumbo_count         <= statistics::rx_jumbo_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_jabber_count        <= statistics::rx_jabber_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_ipg_violation_count <= statistics::rx_ipg_violation_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xon_count       <= statistics::rx_pfc_xon_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xoff_count      <= statistics::rx_pfc_xoff_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_carrier_ext_count   <= statistics::rx_carrier_ext_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pause_xon_count     <= statistics::rx_pause_xon_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pause_xoff_count    <= statistics::rx_pause_xoff_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_control_pkt_count   <= statistics::rx_control_pkt_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xon_prio0_count <= statistics::rx_pfc_xon_prio0_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xon_prio1_count <= statistics::rx_pfc_xon_prio1_pending[mac_addr]; 
+       statistics::v_uif[mac_addr].rx_pfc_xon_prio2_count <= statistics::rx_pfc_xon_prio2_pending[mac_addr]; 
+       statistics::v_uif[mac_addr].rx_pfc_xon_prio3_count <= statistics::rx_pfc_xon_prio3_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xon_prio4_count <= statistics::rx_pfc_xon_prio4_pending[mac_addr]; 
+       statistics::v_uif[mac_addr].rx_pfc_xon_prio5_count <= statistics::rx_pfc_xon_prio5_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xon_prio6_count <= statistics::rx_pfc_xon_prio6_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xon_prio7_count <= statistics::rx_pfc_xon_prio7_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xoff_prio0_count<= statistics::rx_pfc_xoff_prio0_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xoff_prio1_count<= statistics::rx_pfc_xoff_prio1_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xoff_prio2_count<= statistics::rx_pfc_xoff_prio2_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xoff_prio3_count<= statistics::rx_pfc_xoff_prio3_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xoff_prio4_count<= statistics::rx_pfc_xoff_prio4_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xoff_prio5_count<= statistics::rx_pfc_xoff_prio5_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xoff_prio6_count<= statistics::rx_pfc_xoff_prio6_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_pfc_xoff_prio7_count<= statistics::rx_pfc_xoff_prio7_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_drop_count          <= statistics::rx_drop_pending[mac_addr];
     end
   endtask
 
-   //**********************************************************//
+  //**********************************************************//
   // This function resets all TX and RX statistics counters
   // for this mac_addr back to zero.
   //**********************************************************//
   function void reset_counters();
-    statistics::v_uif[mac_addr].tx_good_pkt_count      = 0;
-    statistics::v_uif[mac_addr].tx_bad_pkt_count       = 0;
-    statistics::v_uif[mac_addr].tx_unicast_count       = 0;
-    statistics::v_uif[mac_addr].tx_multicast_count     = 0;
-    statistics::v_uif[mac_addr].tx_broadcast_count     = 0;
-    statistics::v_uif[mac_addr].tx_fragment_count      = 0;
-    statistics::v_uif[mac_addr].tx_runt_count          = 0;
-    statistics::v_uif[mac_addr].tx_pause_count         = 0;
-    statistics::v_uif[mac_addr].tx_vlan_count          = 0;
-    statistics::v_uif[mac_addr].tx_jumbo_count         = 0;
-    statistics::v_uif[mac_addr].tx_jabber_count        = 0;
-    statistics::v_uif[mac_addr].tx_ipg_violation_count = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xon_count       = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xoff_count      = 0;
-    statistics::v_uif[mac_addr].tx_carrier_ext_count   = 0;
-    statistics::v_uif[mac_addr].tx_pause_xon_count     = 0;
-    statistics::v_uif[mac_addr].tx_pause_xoff_count    = 0;
-    statistics::v_uif[mac_addr].tx_control_pkt_count   = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xon_prio0_count = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xon_prio1_count = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xon_prio2_count = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xon_prio3_count = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xon_prio4_count = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xon_prio5_count = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xon_prio6_count = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xon_prio7_count = 0;
-    statistics::v_uif[mac_addr].tx_pfc_xoff_prio0_count= 0;
-    statistics::v_uif[mac_addr].tx_pfc_xoff_prio1_count= 0;
-    statistics::v_uif[mac_addr].tx_pfc_xoff_prio2_count= 0;
-    statistics::v_uif[mac_addr].tx_pfc_xoff_prio3_count= 0;
-    statistics::v_uif[mac_addr].tx_pfc_xoff_prio4_count= 0;
-    statistics::v_uif[mac_addr].tx_pfc_xoff_prio5_count= 0;
-    statistics::v_uif[mac_addr].tx_pfc_xoff_prio6_count= 0;
-    statistics::v_uif[mac_addr].tx_pfc_xoff_prio7_count= 0;
+    statistics::v_uif[mac_addr].tx_good_pkt_count      <= 0;
+    statistics::v_uif[mac_addr].tx_bad_pkt_count       <= 0;
+    statistics::v_uif[mac_addr].tx_unicast_count       <= 0;
+    statistics::v_uif[mac_addr].tx_multicast_count     <= 0;
+    statistics::v_uif[mac_addr].tx_broadcast_count     <= 0;
+    statistics::v_uif[mac_addr].tx_fragment_count      <= 0;
+    statistics::v_uif[mac_addr].tx_runt_count          <= 0;
+    statistics::v_uif[mac_addr].tx_pause_count         <= 0;
+    statistics::v_uif[mac_addr].tx_vlan_count          <= 0;
+    statistics::v_uif[mac_addr].tx_jumbo_count         <= 0;
+    statistics::v_uif[mac_addr].tx_jabber_count        <= 0;
+    statistics::v_uif[mac_addr].tx_ipg_violation_count <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xon_count       <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xoff_count      <= 0;
+    statistics::v_uif[mac_addr].tx_carrier_ext_count   <= 0;
+    statistics::v_uif[mac_addr].tx_pause_xon_count     <= 0;
+    statistics::v_uif[mac_addr].tx_pause_xoff_count    <= 0;
+    statistics::v_uif[mac_addr].tx_control_pkt_count   <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xon_prio0_count <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xon_prio1_count <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xon_prio2_count <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xon_prio3_count <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xon_prio4_count <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xon_prio5_count <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xon_prio6_count <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xon_prio7_count <= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xoff_prio0_count<= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xoff_prio1_count<= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xoff_prio2_count<= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xoff_prio3_count<= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xoff_prio4_count<= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xoff_prio5_count<= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xoff_prio6_count<= 0;
+    statistics::v_uif[mac_addr].tx_pfc_xoff_prio7_count<= 0;
+    statistics::v_uif[mac_addr].tx_drop_count<= 0;
 
-    statistics::v_uif[mac_addr].rx_good_pkt_count      = 0;
-    statistics::v_uif[mac_addr].rx_bad_pkt_count       = 0;
-    statistics::v_uif[mac_addr].rx_unicast_count       = 0;
-    statistics::v_uif[mac_addr].rx_multicast_count     = 0;
-    statistics::v_uif[mac_addr].rx_broadcast_count     = 0;
-    statistics::v_uif[mac_addr].rx_fragment_count      = 0;
-    statistics::v_uif[mac_addr].rx_runt_count          = 0;
-    statistics::v_uif[mac_addr].rx_pause_count         = 0;
-    statistics::v_uif[mac_addr].rx_vlan_count          = 0;
-    statistics::v_uif[mac_addr].rx_jumbo_count         = 0;
-    statistics::v_uif[mac_addr].rx_jabber_count        = 0;
-    statistics::v_uif[mac_addr].rx_ipg_violation_count = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xon_count       = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xoff_count      = 0;
-    statistics::v_uif[mac_addr].rx_carrier_ext_count   = 0;
-    statistics::v_uif[mac_addr].rx_pause_xon_count     = 0;
-    statistics::v_uif[mac_addr].rx_pause_xoff_count    = 0;
-    statistics::v_uif[mac_addr].rx_control_pkt_count   = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xon_prio0_count = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xon_prio1_count = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xon_prio2_count = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xon_prio3_count = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xon_prio4_count = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xon_prio5_count = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xon_prio6_count = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xon_prio7_count = 0;
-    statistics::v_uif[mac_addr].rx_pfc_xoff_prio0_count= 0;
-    statistics::v_uif[mac_addr].rx_pfc_xoff_prio1_count= 0;
-    statistics::v_uif[mac_addr].rx_pfc_xoff_prio2_count= 0;
-    statistics::v_uif[mac_addr].rx_pfc_xoff_prio3_count= 0;
-    statistics::v_uif[mac_addr].rx_pfc_xoff_prio4_count= 0;
-    statistics::v_uif[mac_addr].rx_pfc_xoff_prio5_count= 0;
-    statistics::v_uif[mac_addr].rx_pfc_xoff_prio6_count= 0;
-    statistics::v_uif[mac_addr].rx_pfc_xoff_prio7_count= 0;
+    statistics::v_uif[mac_addr].rx_good_pkt_count      <= 0;
+    statistics::v_uif[mac_addr].rx_bad_pkt_count       <= 0;
+    statistics::v_uif[mac_addr].rx_unicast_count       <= 0;
+    statistics::v_uif[mac_addr].rx_multicast_count     <= 0;
+    statistics::v_uif[mac_addr].rx_broadcast_count     <= 0;
+    statistics::v_uif[mac_addr].rx_fragment_count      <= 0;
+    statistics::v_uif[mac_addr].rx_runt_count          <= 0;
+    statistics::v_uif[mac_addr].rx_pause_count         <= 0;
+    statistics::v_uif[mac_addr].rx_vlan_count          <= 0;
+    statistics::v_uif[mac_addr].rx_jumbo_count         <= 0;
+    statistics::v_uif[mac_addr].rx_jabber_count        <= 0;
+    statistics::v_uif[mac_addr].rx_ipg_violation_count <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xon_count       <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xoff_count      <= 0;
+    statistics::v_uif[mac_addr].rx_carrier_ext_count   <= 0;
+    statistics::v_uif[mac_addr].rx_pause_xon_count     <= 0;
+    statistics::v_uif[mac_addr].rx_pause_xoff_count    <= 0;
+    statistics::v_uif[mac_addr].rx_control_pkt_count   <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xon_prio0_count <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xon_prio1_count <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xon_prio2_count <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xon_prio3_count <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xon_prio4_count <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xon_prio5_count <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xon_prio6_count <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xon_prio7_count <= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xoff_prio0_count<= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xoff_prio1_count<= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xoff_prio2_count<= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xoff_prio3_count<= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xoff_prio4_count<= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xoff_prio5_count<= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xoff_prio6_count<= 0;
+    statistics::v_uif[mac_addr].rx_pfc_xoff_prio7_count<= 0;
+    statistics::v_uif[mac_addr].rx_drop_count<= 0;
 
   endfunction 
 
@@ -556,7 +712,7 @@ endtask
     tr = eth_seq_item::type_id::create("tr", this);
     foreach(tr.mac_addr[i]) begin
       if(tr.mac_addr[i] == mac_addr)
-	      return i;
+	return i;
     end
   endfunction
 
@@ -565,7 +721,7 @@ endtask
   // summary report for this mac_addr at the end of the test.
   //**********************************************************//
   
-function void report_phase(uvm_phase phase);
+  function void report_phase(uvm_phase phase);
     string tx_rx_report;
 
     tx_rx_report = $sformatf(
@@ -609,7 +765,7 @@ function void report_phase(uvm_phase phase);
     tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[5]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio5_count)};
     tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[6]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio6_count)};
     tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[7]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio7_count)};
-
+    tx_rx_report = {tx_rx_report, $sformatf("TX DROP COUNT            = %0d\n", statistics::v_uif[mac_addr].tx_drop_count)};
 
     tx_rx_report = {tx_rx_report, $sformatf(
       "---------------- MAC %0d : RX COUNTERS ----------------\n", mac_no(mac_addr))};
@@ -648,13 +804,12 @@ function void report_phase(uvm_phase phase);
     tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[5]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio5_count)};
     tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[6]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio6_count)};
     tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[7]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio7_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX DROP COUNT            = %0d\n", statistics::v_uif[mac_addr].rx_drop_count)};
     tx_rx_report = {tx_rx_report, "\n================================================"};
 
     `uvm_info("COUNTER_REPORT", tx_rx_report, UVM_NONE)
-
   endfunction
-
-
+  
  
 endclass
 

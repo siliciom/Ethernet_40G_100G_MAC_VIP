@@ -103,6 +103,8 @@ module eth_top;
     for (gj = 0; gj < `NO_OF_AGENTS; gj++) begin : user_int
       initial begin
         statistics::v_uif[mac_uni[gj]] = ui_inf[gj];
+        uvm_config_db#(virtual eth_interface)::set(null, "uvm_test_top.env_h.pause_h", $sformatf("vinf%0d",gj), eth_if[gj]);
+        uvm_config_db#(virtual eth_interface)::set(null, "uvm_test_top.env_h.ipg_chkr_h", $sformatf("vinf%0d",gj), eth_if[gj]);	
       end
     end
   endgenerate
