@@ -67,6 +67,9 @@ class base_virtual_seq extends uvm_sequence;
   bit waiting_for_xon;
   int invalid_char_pkt_cnt = 0;
   int unsigned SKIP_FRAMES = 2;
+  int total_no_of_pkts_0;
+  int total_no_of_pkts_1;
+
 
   
   
@@ -218,43 +221,44 @@ class virtual_seq extends base_virtual_seq;
                   send_immediate_xon=0;
                 end 
                 //Normal_pause +(Xon & Xoff)
-                else if(normal_xon_xoff_en && pause_gap_cnt==0 && $urandom_range(1,100)<10) begin
+                else if(normal_xon_xoff_en && pause_gap_cnt==0 && $urandom_range(1,100)<10 && total_no_of_pkts_0 <(`NO_OF_PKTS-30)) begin
                   seq1.pause_sel = 1;
                   if($urandom_range(1,100)<=3)
                     seq1.pause_time=0; //xon
                   else begin
                     seq1.pause_time=$urandom_range(1,10); //xoff
-                    if($urandom_range(1,100)<=70)
+                    if($urandom_range(1,100)<=30)
                       send_immediate_xon=1;
                   end   
                   pause_gap_cnt = $urandom_range(5,6);
                 end 
                 //reserved_opcode
-                else if(pause_rsd_en && $urandom_range(0,100)<5) begin
+                else if(pause_rsd_en && $urandom_range(0,100)<5 && total_no_of_pkts_0 <(`NO_OF_PKTS-30)) begin
                   seq1.pause_sel=1;
                   seq1.pause_rsd_en=pause_rsd_en;
                   seq1.pause_time=$urandom_range(1,10);
                 end
                 //pause_update_time
-                else if(this.pause_update_time_en  && ($urandom_range(1,100)<30) ) begin
+                else if(this.pause_update_time_en  && ($urandom_range(1,100)<30) && total_no_of_pkts_0 <(`NO_OF_PKTS-30) ) begin
                   seq1.pause_sel =1;
                   seq1.pause_time=$urandom_range(1,10);
                 end
                 //simultaneous_pause_frames
-                else if(this.pause_simul_en && $urandom_range(1,50)<20) begin
+                else if(this.pause_simul_en && $urandom_range(1,50)<12 && total_no_of_pkts_0 <(`NO_OF_PKTS-30)) begin
                   seq1.pause_sel  = 1;
                   seq1.pause_time = $urandom_range(1,10);
-                  //simul_pause_en2   = 1;
+                  simul_pause_en2   = 1;
                   //simul_pause_time2 = $urandom_range(1,10);
                 end
                 //pause_with_vlan_frames
-                else if(this.vlan_pause_en && $urandom_range(1,100)<7) begin
+                else if(this.vlan_pause_en && $urandom_range(1,100)<7 && total_no_of_pkts_0 <(`NO_OF_PKTS-30)) begin
                   seq1.pause_sel=1;
                   seq1.pause_time=$urandom_range(1,10);
 		 // seq1.vlan_en=0;
                 end          
                 else     
                   seq1.pause_sel=0;
+		total_no_of_pkts_0++;
                 seq1.start(p_sequencer.mac_seqr_h[0]);
               end
             end
@@ -262,16 +266,15 @@ class virtual_seq extends base_virtual_seq;
               repeat(this.no_of_pkts) begin
                 seq2 = eth_normal_frame_seq::type_id::create("seq2");
                 apply_config(seq2);
-		/*if(this.pause_simul_en && $urandom_range(1,50)<20) begin
+		if(this.simul_pause_en2 && total_no_of_pkts_1 <(`NO_OF_PKTS-30)) begin
                   seq2.pause_sel  = 1;
                   seq2.pause_time = $urandom_range(1,10);
-                end  */
-	        if(this.pause_simul_en && $urandom_range(1,50)<20) begin
-                  seq2.pause_sel  = 1;
-                  seq2.pause_time = $urandom_range(1,10);
+		  simul_pause_en2=0;
                 end
                 else
                   seq2.pause_sel = 0;
+
+		total_no_of_pkts_1++;
                 seq2.start(p_sequencer.mac_seqr_h[1]);
               end
             end
@@ -282,7 +285,7 @@ class virtual_seq extends base_virtual_seq;
           fork
             begin
               repeat(this.no_of_pkts) begin
-                seq2 = eth_normal_frame_seq::type_id::create($sformatf("vlan_seq_%0d",$time));
+                seq1 = eth_normal_frame_seq::type_id::create($sformatf("vlan_seq_%0d",$time));
                 apply_config(seq1);
                 if(pfc_stress_en && !pcp_rand_en)
                   void'(std::randomize(seq1.pfc_sel) with {seq1.pfc_sel dist {0:=90, 1:=10};});
@@ -290,7 +293,8 @@ class virtual_seq extends base_virtual_seq;
                   pkt_gap_cnt--;
                 //Basic_pfc  
                 if(basic_pfc_en && $urandom_range(1,50)<10) begin
-                  seq1.pfc_sel=1;    
+                  seq1.pfc_sel=1;
+	          seq1.vlan_en=0;	  
                   seq1.temp_pcp=3;//$urandom_range(1,4);
                   seq1.priority_en_vector[seq1.temp_pcp] = 1;// priority[3] 
                   for(int i=0;i<8;i++)
@@ -699,6 +703,7 @@ class virtual_seq extends base_virtual_seq;
     
   endtask 
 endclass
+
 
 
 

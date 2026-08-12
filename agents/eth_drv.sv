@@ -34,14 +34,18 @@ class eth_drv extends uvm_driver#(eth_seq_item);
   eth_seq_item pause_hold_q[$];
   bit pause_drain_in_progress=0;
   semaphore tx_sem;
+  int frame_count = 0;
+  bit final_frame = 0;
+  bit tx_busy = 0;
+  bit frame_aborted = 0;
 
   
   typedef struct packed {
     logic [`DATA_WIDTH-1:0] txd;
     logic [`CTRL_WIDTH-1:0]  txc;
-} xlgmii_word_t;
+  } xlgmii_word_t;
  
-xlgmii_word_t xlgmii_q[$];
+  xlgmii_word_t xlgmii_q[$];
  
 
   function new(string name = "eth_drv", uvm_component parent = null);
@@ -67,48 +71,56 @@ xlgmii_word_t xlgmii_q[$];
   // This task do the handshake mechanism and get the data
   // from sequence.
   //**********************************************************// 
-task run_phase(uvm_phase phase);
+  task run_phase(uvm_phase phase);
     drive_reset();
     reset_counters();
     wait(v_intf.rst);
-        send_idle();
-	repeat($urandom_range(1,5)) @(v_intf.drv_cb);
-      	fork
-	update_counters();
-	pause_timer();
-       	drain_pause_queue();;
-        join_none
+    send_idle();
+    repeat($urandom_range(1,5)) @(v_intf.drv_cb);
+    fork
+      update_counters();
+      pause_timer();
+      //pfc_timer();
+      drain_pause_queue();;
+    join_none
 
     forever begin
-	wait(statistics::pause_flag[mac_addr]==0);
+      wait(statistics::pause_flag[mac_addr]==0);
 
-        seq_item_port.get_next_item(tr);
-	if(statistics::pause_flag[mac_addr]) begin
-	  pause_hold_q.push_back(tr);
-          `uvm_info("PAUSE_HOLD_Q",
-                   $sformatf("mac_addr=%h frame queued during pause, size=%0d", mac_addr, pause_hold_q.size()),UVM_LOW)
-          tx_sem.put(1);
-        end
-        else begin
-          tx_sem.get(1);
-          //wait_for_drain_complete(.hold_sem(1));
-	  if(statistics::pause_flag[mac_addr]) begin        
-	    pause_hold_q.push_back(tr);
-	    `uvm_info("Re_PAUSE_HOLD_Q",$sformatf("mac=%h re-queued after sem grant",mac_addr),UVM_LOW)
-	    tx_sem.put(1);
-	  end
-	  else begin
-	    frame_pack(tr);
-	    rs_encode();
-	    drive_frame();
-	    send_dic_idle(); 
-	    eth_packet_tracker::print_packet("TX",this.get_full_name(),tr);
-	    tx_sem.put(1);
-          end
-       end 
-        seq_item_port.item_done();  
+      seq_item_port.get_next_item(tr);
+      frame_count++;
+      final_frame = (frame_count == `NO_OF_PKTS);
+      if(statistics::pause_flag[mac_addr]) begin
+	pause_hold_q.push_back(tr);
+	`uvm_info("PAUSE_HOLD_Q",
+	  $sformatf("mac_addr=%h frame queued during pause, size=%0d", mac_addr, pause_hold_q.size()),UVM_LOW)
+	  tx_sem.put(1);
       end
-endtask
+      else begin
+	tx_sem.get(1);
+	//wait_for_drain_complete(.hold_sem(1));
+	if(statistics::pause_flag[mac_addr]) begin        
+	  pause_hold_q.push_back(tr);
+	  `uvm_info("Re_PAUSE_HOLD_Q",$sformatf("mac=%h re-queued after sem grant",mac_addr),UVM_LOW)
+	  tx_sem.put(1);
+	end
+	else begin
+	  tx_busy=1;
+	  frame_pack(tr);
+	  rs_encode();
+	  drive_frame();
+	  tx_busy=0; 
+	  if (!frame_aborted)
+	    // tx_busy=0; 
+	  send_dic_idle();
+	  // tx_busy=0; 
+	  eth_packet_tracker::print_packet("TX",this.get_full_name(),tr);
+	  tx_sem.put(1);
+	end
+      end 
+      seq_item_port.item_done();  
+    end
+  endtask
 
   //**********************************************************//
   // This tasks do the reset of all signals. 
@@ -130,51 +142,43 @@ endtask
   task pause_timer();
     int local_pause_cycles;
     int prev_pause_value;
-    bit pause_started;
+
     forever begin
       wait(statistics::pause_flag[mac_addr] == 1);
-       @(v_intf.drv_cb);
-      `uvm_info("A1111111AAAAAAAA",$sformatf("pause_flag=%d",statistics::pause_flag[mac_addr]),UVM_LOW)
-      wait(frame_in_progress == 0);
-      `uvm_info("AAAAAAAAA",$sformatf("pause_flag=%d",statistics::pause_flag[mac_addr]),UVM_LOW)
+      wait(tx_busy==0);
+      //  @(v_intf.drv_cb);
+      // wait(frame_in_progress == 0);
       prev_pause_value   = statistics::pause_value[mac_addr];
       local_pause_cycles = prev_pause_value * PAUSE_QUANTA_CYCLES;
-      pause_started=1;
+      // pause_started=1;
       //statistics::pause_update[mac_addr] = 0;
 
       `uvm_info("PAUSE_DBG", $sformatf("mac=%0d PV=%0d cycles=%0d",
-                mac_addr[7:0], prev_pause_value, local_pause_cycles), UVM_LOW)
+	mac_addr[7:0], prev_pause_value, local_pause_cycles), UVM_LOW)
 
-      while(local_pause_cycles > 0) begin
-	@(v_intf.drv_cb);
-        v_intf.drv_cb.TXD <= {8{`IDLE_CH}};
-        v_intf.drv_cb.TXC <= 8'hFF;
-        
+	while(local_pause_cycles > 0) begin
+	  @(v_intf.drv_cb);
+	  v_intf.drv_cb.TXD <= {8{`IDLE_CH}};
+	  v_intf.drv_cb.TXC <= 8'hFF;
+	  //@(v_intf.drv_cb);
 
-        if(statistics::pause_update[mac_addr]) begin
-          prev_pause_value   = statistics::pause_value[mac_addr];
-          local_pause_cycles = prev_pause_value * PAUSE_QUANTA_CYCLES;
-          pause_started=1;
-          statistics::pause_update[mac_addr] = 0;
-          `uvm_info("PAUSE_UPDATE", $sformatf("New PV=%0d -> cycles=%0d",
-                    prev_pause_value, local_pause_cycles), UVM_LOW)
-        end
-	// if(pause_started) begin
-	//	   `uvm_info("PAUSE_CYCLES",$sformatf("pause_cycles=%0d",local_pause_cycles),UVM_LOW)
-	//	   pause_started=0;
-	//	   continue;
-	//	 end 
-        
-      //`uvm_info("PAUSE_CYCLES",$sformatf("pause_cycles=%0d",local_pause_cycles),UVM_LOW)
-                
-		 local_pause_cycles--;
-            `uvm_info("PAUSE_CYCLES",$sformatf("pause_cycles=%0d",local_pause_cycles),UVM_LOW)
-        end
-      statistics::pause_flag[mac_addr] = 0;
-      	      `uvm_info("PAUSE", $sformatf("TX Resume mac_id=%0d", mac_addr[7:0]), UVM_LOW)
+
+	  if(statistics::pause_update[mac_addr]) begin
+	    prev_pause_value   = statistics::pause_value[mac_addr];
+	    local_pause_cycles = prev_pause_value * PAUSE_QUANTA_CYCLES;
+	    //pause_started=1;
+	    statistics::pause_update[mac_addr] = 0;
+	    `uvm_info("PAUSE_UPDATE", $sformatf("New PV=%0d -> cycles=%0d",
+	      prev_pause_value, local_pause_cycles), UVM_LOW)
+	  end
+	  `uvm_info("PAUSE_CYCLES",$sformatf("pause_cycles=%0d",local_pause_cycles),UVM_LOW)
+	  local_pause_cycles--;
+
+	end
+	statistics::pause_flag[mac_addr] = 0;
+	`uvm_info("PAUSE", $sformatf("TX Resume mac_id=%0d", mac_addr[7:0]), UVM_LOW)
       end
-  endtask
-
+    endtask
 
   task drain_pause_queue();
     forever begin
@@ -192,9 +196,13 @@ endtask
         break;                          
       end
       local_tr = pause_hold_q.pop_front();
+      tx_busy=1;
       frame_pack(local_tr);
-     // retry_q = frame_q;
+      rs_encode();
       drive_frame();
+      tx_busy = 0;
+      if (!frame_aborted)
+	send_dic_idle();
       tx_sem.put(1);
     end
  
@@ -213,10 +221,10 @@ endtask
   // ether_type, payload, padding, CRC) ready to be driven.
   //**********************************************************//
  
-   task frame_pack(ref eth_seq_item tr);
+  task frame_pack(ref eth_seq_item tr);
     idx = 0;
-      frame_q.delete();
- `uvm_do_callbacks(eth_drv, error_cb, inject_error(tr));
+    frame_q.delete();
+    `uvm_do_callbacks(eth_drv, error_cb, inject_error(tr));
 
     //Preamble packing
     foreach(tr.preamble[i])
@@ -230,7 +238,7 @@ endtask
     for(int i = 5; i >= 0; i--) //6 bytes of Source Address
       frame_q[idx++] = tr.sa[i*8 +: 8];
 
-     //Outer (Service) VLAN tag — only if double-tagging enabled
+    //Outer (Service) VLAN tag — only if double-tagging enabled
     if(tr.outer_vlan_en == 1) begin
       frame_q[idx++] = tr.outer_TPID[15:8];
       frame_q[idx++] = tr.outer_TPID[7:0];
@@ -238,7 +246,7 @@ endtask
       frame_q[idx++] = tr.outer_VID[7:0];
     end
 
-     //If VLAN TAG is Enable, vlan fields packing
+    //If VLAN TAG is Enable, vlan fields packing
     if(tr.vlan_en == 1) begin
       frame_q[idx++] = tr.TPID[15:8];
       frame_q[idx++] = tr.TPID[7:0];      
@@ -251,58 +259,75 @@ endtask
     frame_q[idx++] = tr.ether_type[7:0];
 
     //Pause frame packing 
-   if(tr.pause_frame_en ) begin
-     frame_q[idx++] = tr.pause_opc[15:8];
-     frame_q[idx++] = tr.pause_opc[7:0];
-     frame_q[idx++] = tr.pause_time[15:8];
-     frame_q[idx++] = tr.pause_time[7:0];
-      for(int i = 0; i< 42;i++)
-          frame_q[idx++] = 0;
+    if(tr.pause_frame_en || tr.pfc_frame_en ) begin
+      frame_q[idx++] = tr.pause_opc[15:8];
+      frame_q[idx++] = tr.pause_opc[7:0];
+      if(tr.pfc_frame_en) begin // logic for pfc frame 
+	frame_q[idx++] = tr.priority_en_vector[15:8];
+	frame_q[idx++] = tr.priority_en_vector[7:0];
+	for(int i=0;i<8;i++) begin
+	  frame_q[idx++]=tr.pfc_pause_time[i][15:8];
+	  frame_q[idx++]=tr.pfc_pause_time[i][7:0];
+	end
+	//payload
+	for(int i = 0; i<26; i++)
+	  frame_q[idx++] = 8'h00;
+
+	`uvm_info("DRIVING DATA", $sformatf("\n\t da=%h\n\t sa=%h\n\t type=%0h\n\t opcode=%0h\n\t priority_en_vector=%0d \n\t pfc_pause_time=%p	\n\t payload=%0d\n\t Frame size=%0d",tr.da, tr.sa, tr.ether_type, tr.pause_opc,tr.priority_en_vector, tr.pfc_pause_time, tr.payload.size(), idx), UVM_LOW) 
+      end
+
+      else begin ///logic for pause frame 
+
+	frame_q[idx++] = tr.pause_time[15:8];
+	frame_q[idx++] = tr.pause_time[7:0];
+	for(int i = 0; i< 42;i++)
+	  frame_q[idx++] = 0;
 	`uvm_info("DRIVING DATA", $sformatf("pause_frame_en=%0b,da=%p,sa=%p,type=%0h,opcode=%0h,payload=%0d,Frame size = %0d",
-	      tr.pause_frame_en,tr.da,tr.sa,tr.ether_type,tr.pause_opc,tr.payload.size(),idx),UVM_LOW)
-   end
-  else begin
+	  tr.pause_frame_en,tr.da,tr.sa,tr.ether_type,tr.pause_opc,tr.payload.size(),idx),UVM_LOW)
+      end
+    end
+    else begin
 
-    //Payload packing
+      //Payload packing
       for(int i = (tr.payload.size()- 1);i >= 0 ;i--)
-        frame_q[idx++] = tr.payload[i];
-        //Zero Padding if payload is less than 46 bytes for normal frame and
-	// bytes for vlan tagged frame
-      
-      if(tr.outer_vlan_en == 1 && tr.vlan_en == 1)
-         pad_cnt = 38;
-      else if(tr.vlan_en == 1)
-        pad_cnt = 42;
-      else
-        pad_cnt = 46;
+	frame_q[idx++] = tr.payload[i];
+      //Zero Padding if payload is less than 46 bytes for normal frame and
+      // bytes for vlan tagged frame
 
-       if(tr.payload.size() < pad_cnt && tr.padding_en == 1) begin
-        for(int i = tr.payload.size(); i < pad_cnt; i++)
-          frame_q[idx++] = 0;
+      if(tr.outer_vlan_en == 1 && tr.vlan_en == 1)
+	pad_cnt = 38;
+      else if(tr.vlan_en == 1)
+	pad_cnt = 42;
+      else
+	pad_cnt = 46;
+
+      if(tr.payload.size() < pad_cnt && tr.padding_en == 1) begin
+	for(int i = tr.payload.size(); i < pad_cnt; i++)
+	  frame_q[idx++] = 0;
       end
-      end
-      
+    end
+
     //CRC packing
     next_crc32 = 32'hFFFFFFFF;
     for(int i = 0;i < idx;i++) begin
       if(i > 7) //Avoiding the Preamble and SFD Bytes
-        next_crc32 = tr.crc_32(next_crc32, frame_q[i]);
+	next_crc32 = tr.crc_32(next_crc32, frame_q[i]);
     end
     next_crc32 = ~next_crc32;
     tr.crc = next_crc32;
     //BAD FCS 
     if(tr.corrupt_fcs_en==1) begin
-	    next_crc32[7:0] = ~next_crc32[7:0];
-	    `uvm_info("BAD_FCS",$sformatf("Transmitting incorrect CRC=%h",next_crc32),UVM_LOW)
+      next_crc32[7:0] = ~next_crc32[7:0];
+      `uvm_info("BAD_FCS",$sformatf("Transmitting incorrect CRC=%h",next_crc32),UVM_LOW)
     end
-  //  tr.CRC =next_crc32;
+    //  tr.CRC =next_crc32;
     for(int i = 3;i >= 0;i--)
       frame_q[idx++] = next_crc32[8*i +: 8]; 
     tx_idx=0;
     // Print full frame format always
     $display("*****************************ETH_DRIVER***********************************");
     `uvm_info("DRIVER PACKING", $sformatf("\n\t preamble = %p\n\t sfd = 0x%0h\n\t DA = %h\n\t SA = %h\n\t ether_type = 0x%0h\n\t payload = %h bytes\n\t crc = 0x%h\n\t Total frame size = %0d, Frame size from DA = %0d\n\t Payload size = %0d\n\n\t VLAN_EN = %b\n\t VLAN_TPID = %h\n\t PCP = %h, DEI = %h, VID = %h ,OUTER_TPID =%h,OUTER_PCP =%h,OUTER_DEI =%h,OUTER_VID =%h ,",tr.preamble, tr.sfd, tr.da, tr.sa,tr.ether_type, tr.payload.size(), next_crc32,idx,idx - 8,tr.payload.size(),tr.vlan_en, tr.TPID, tr.PCP,tr.DEI,tr.VID,tr.outer_TPID,tr.outer_PCP,tr.outer_DEI,tr.outer_VID), UVM_LOW)
-    
+
     `uvm_info("DRIVING DATA", $sformatf("Frame size = %0d, CRC = %h",idx,next_crc32),UVM_LOW);
   endtask
 
@@ -325,14 +350,14 @@ endtask
   // idle per Deficit Idle Count rules, packs into 8-byte words
   // (xlgmii_q).
   //**********************************************************// 
-task rs_encode();
+  task rs_encode();
 
     byte rs_frame[$];
     bit  rs_ctrl[$];
     xlgmii_word_t word;
     int idx;
     int bytes_used_in_word;
-    
+
 
     rs_frame.delete();
     rs_ctrl.delete();
@@ -348,29 +373,29 @@ task rs_encode();
     // 2. Remaining Ethernet frame (skip preamble byte 0)
     //--------------------------------------------------
     for(int i=1;i<frame_q.size();i++) begin
-        rs_frame.push_back(frame_q[i]);
-        rs_ctrl.push_back(0);
+      rs_frame.push_back(frame_q[i]);
+      rs_ctrl.push_back(0);
     end
 
     //--------------------------------------------------
     // 3. TERMINATE
     //--------------------------------------------------
     if(!tr.missing_terminate) begin
-    rs_frame.push_back(`TERMINATE_CH );
-    rs_ctrl.push_back(1'b1);
+      rs_frame.push_back(`TERMINATE_CH );
+      rs_ctrl.push_back(1'b1);
     end
     else begin
-    `uvm_info(get_type_name(), "Skipping Terminate character (0xFD)", UVM_LOW)
-   end
+      `uvm_info(get_type_name(), "Skipping Terminate character (0xFD)", UVM_LOW)
+    end
 
     //--------------------------------------------------
     // 4. Find which lane FD landed on
     //--------------------------------------------------
     bytes_used_in_word = rs_frame.size() % NUM_LANES;      // 1..8 (never 0 exactly here since FD just pushed)
     if (bytes_used_in_word == 0)
-        fd_lane = NUM_LANES-1;                                // FD exactly filled last lane
+      fd_lane = NUM_LANES-1;                                // FD exactly filled last lane
     else
-        fd_lane = bytes_used_in_word - 1;
+      fd_lane = bytes_used_in_word - 1;
 
     pad_within_word = (NUM_LANES - rs_frame.size()%NUM_LANES) % NUM_LANES;  // bytes left in the FD's own word
 
@@ -378,8 +403,8 @@ task rs_encode();
     // 5. Fill rest of FD's word with idle
     //--------------------------------------------------
     repeat(pad_within_word) begin
-        rs_frame.push_back(`IDLE_CH);
-        rs_ctrl.push_back(1);
+      rs_frame.push_back(`IDLE_CH);
+      rs_ctrl.push_back(1);
     end
 
     //--------------------------------------------------
@@ -387,25 +412,25 @@ task rs_encode();
     //--------------------------------------------------
     idx = 0;
     while(idx < rs_frame.size()) begin
-        word.txd = 0;
-        word.txc = 0;
-        for(int lane=0; lane<NUM_LANES; lane++) begin
-            word.txd[lane*8 +:8] = rs_frame[idx];
-            word.txc[lane]       = rs_ctrl[idx];
-            idx++;
-        end
-        xlgmii_q.push_back(word);
+      word.txd = 0;
+      word.txc = 0;
+      for(int lane=0; lane<NUM_LANES; lane++) begin
+	word.txd[lane*8 +:8] = rs_frame[idx];
+	word.txc[lane]       = rs_ctrl[idx];
+	idx++;
+      end
+      xlgmii_q.push_back(word);
     end
 
     // NEW - inject a single invalid control char at a chosen word/lane,
     // AFTER the frame is fully encoded, so only one lane is corrupted
     if (tr.invalid) begin
-        xlgmii_q[0].txd[0*8 +: 8] = 8'h1E;
-        xlgmii_q[0].txc[0]        = 1'b1;
+      xlgmii_q[0].txd[0*8 +: 8] = 8'h1E;
+      xlgmii_q[0].txc[0]        = 1'b1;
 
-        `uvm_info(get_type_name(), "Driving INVALID ctrl char=0x1E at word=0 lane=0", UVM_LOW)
+      `uvm_info(get_type_name(), "Driving INVALID ctrl char=0x1E at word=0 lane=0", UVM_LOW)
     end
-endtask
+  endtask
 
   //**********************************************************//
 // This task computes and drives the mandatory/DIC idle
@@ -418,6 +443,9 @@ task send_dic_idle();
   int natural_idle;
   int surplus, shortfall;
   int extra_words;
+  extra_words = 0;
+  surplus     = 0;
+  shortfall   = 0;
 
   //--------------------------------------------------
   // 6. Mandatory one full idle word so next frame's
@@ -436,6 +464,7 @@ task send_dic_idle();
   // 7. Deficit Idle Count
   //--------------------------------------------------
   if(natural_idle >= 12) begin
+
     surplus = natural_idle - 12;
     if(deficit_cnt > 0) begin
       if(surplus >= deficit_cnt) begin
@@ -450,7 +479,9 @@ task send_dic_idle();
   end
   else begin
     shortfall   = 12 - natural_idle;
+
     deficit_cnt = deficit_cnt + shortfall;
+
     if(deficit_cnt > 7) begin
       extra_words++;
       deficit_cnt  = deficit_cnt - 8;
@@ -459,17 +490,66 @@ task send_dic_idle();
     end
   end
 
-  `uvm_info("FD_LANE_INFO", $sformatf("FD_LANE=%0d NATURAL_IDLE=%0d DEFICIT_CNT=%0d",
-            fd_lane, natural_idle, deficit_cnt), UVM_LOW)
-
+ 
   //--------------------------------------------------
   // 8. Drive the computed idle words onto the bus
   //--------------------------------------------------
-  for(int i = 0; i <= extra_words; i++) begin
+  for(int i = 0; i < extra_words; i++) begin
     @(v_intf.drv_cb);
+      /*`uvm_info("DIC_IDLE",
+      $sformatf("Driving DIC IDLE word %0d TXD=%016h TXC=%02h",
+                i, {8{`IDLE_CH}}, 8'hFF),
+      UVM_LOW) */
     v_intf.drv_cb.TXD <= {8{`IDLE_CH}};
     v_intf.drv_cb.TXC <= 8'hFF;
+   // `uvm_info("EXTRA_WORDS",$sformatf("txd=%0h",v_intf.drv_cb.TXD),UVM_LOW)
   end
+ `uvm_info("FD_LANE_INFO", $sformatf("FD_LANE=%0d NATURAL_IDLE=%0d DEFICIT_CNT=%0d",
+            fd_lane, natural_idle, deficit_cnt), UVM_LOW)
+
+
+   //--------------------------------------------------
+    // FINAL FRAME HANDLING
+    //--------------------------------------------------
+    if(final_frame) begin
+
+        `uvm_info("FINAL_FRAME",
+            $sformatf("Final frame detected. Remaining DIC=%0d",
+                      deficit_cnt),
+            UVM_LOW)
+
+        //--------------------------------------------------
+        // Flush remaining DIC
+        //--------------------------------------------------
+        if(deficit_cnt > 0) begin
+
+            @(v_intf.drv_cb);
+
+           // v_intf.drv_cb.TXD <= {8{`IDLE_CH}};
+            //v_intf.drv_cb.TXC <= 8'hFF;
+	    //
+	      for (int lane = 0; lane < deficit_cnt; lane++) begin
+            v_intf.drv_cb.TXD[lane*8 +: 8] <= `IDLE_CH;
+            v_intf.drv_cb.TXC[lane]        <= 1'b1;
+	      end
+
+            `uvm_info("FINAL_DIC_FLUSH",$sformatf("Final DIC=%0h flushed with idle word,txd=%0h",deficit_cnt,v_intf.drv_cb.TXD),UVM_LOW)
+
+            deficit_cnt = 0;
+
+        end
+
+        //--------------------------------------------------
+        // Always leave interface in IDLE after final frame
+        //--------------------------------------------------
+        @(v_intf.drv_cb);
+
+        v_intf.drv_cb.TXD <= {8{`IDLE_CH}};
+        v_intf.drv_cb.TXC <= 8'hFF;
+
+        `uvm_info("FINAL_IDLE",$sformatf("Final frame completed. XLGMII driven to IDLE. txd=%0d",v_intf.drv_cb.TXD), UVM_LOW)
+
+    end
 endtask
 
 
@@ -484,6 +564,7 @@ task drive_frame();
     xlgmii_word_t word;
     int byte_cnt = 0;
     frame_in_progress = 1;
+    frame_aborted = 0;
 
 
     foreach(xlgmii_q[i]) begin
@@ -492,13 +573,24 @@ task drive_frame();
 	   if(statistics::pause_flag[mac_addr]) begin
           frame_q.delete();
           frame_in_progress=0;
+          frame_aborted = 1;
           pause_hold_q.push_front(tr);
-          `uvm_info("pppppppppppppppppppppppppppppp","",UVM_LOW)
+	    // Never leave stale FD/data on the bus for this edge
+              v_intf.drv_cb.TXD <= {8{`IDLE_CH}};
+              v_intf.drv_cb.TXC <= 8'hFF;
+
+              `uvm_info("PAUSE_ABORT_FRAME",
+                  "Frame aborted at i=0 due to pause reassertion, driving idle",
+                  UVM_LOW)
            return;
         end
 	
 	end
         word = xlgmii_q[i];
+	   `uvm_info("DRIVE_WORD",
+      $sformatf("WORD=%0d TXD=%016h TXC=%02h",
+                i, word.txd, word.txc),
+      UVM_LOW)
         for(int lane=0; lane<NUM_LANES; lane++) begin
             // Count only DATA bytes
             if(word.txc[lane] == 0) begin
@@ -546,7 +638,7 @@ endtask
   // counters.
   //**********************************************************//
 
-task update_counters();
+  task update_counters();
     forever begin
        @(v_intf.drv_cb);
        statistics::v_uif[mac_addr].tx_good_pkt_count      <= statistics::tx_good_pkt_pending[mac_addr];
@@ -812,5 +904,6 @@ task update_counters();
   
  
 endclass
+
 
 

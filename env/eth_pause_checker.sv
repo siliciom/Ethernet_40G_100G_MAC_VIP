@@ -40,6 +40,7 @@ class eth_pause_checker extends uvm_component;
   longint    p_time[`NO_OF_AGENTS];          // countdown in bytes
   localparam int PAUSE_QUANTUM_BYTES = 64; 
   localparam int CLOCKS_PER_QUANTA = PAUSE_QUANTUM_BYTES / BYTES_PER_CLK;  // 64/8 = 8 for your config
+  bit        timer_upd_done[`NO_OF_AGENTS];
 
   function new(string name = "eth_pause_checker", uvm_component parent = null);
     super.new(name, parent);
@@ -172,6 +173,7 @@ class eth_pause_checker extends uvm_component;
             frame_q[i].delete();
             if (start_pause_xoff_timing[i]) pause_override_en[i] = 1;
             pause_xoff_en[i] = 1;
+            if (pause_override_en[i]) timer_upd_done[i] = 1;
           end
           else begin
             // Not a PAUSE frame - drain remaining bytes until EOF sentinel
@@ -190,7 +192,9 @@ class eth_pause_checker extends uvm_component;
           `uvm_error("PCH_INC_RX_PAUSE",
              $sformatf("Agent - %0d, Received Pause with incorrect size (bytes=%0d)", i, byte_cnt[i]))
 
+          `uvm_info("", $sformatf("Agent - %0d, iiiiiiiiiiiiiiiiiiiiiiiiiiiii -- %0d -- %0d", i, pause_override_en[i],start_pause_xoff_timing[i] ), UVM_LOW)
         if (pause_override_en[i]) begin
+          `uvm_info("", $sformatf("Agent - %0d, jjjjjjjjjjjjjjjjjjjjjjjjjjjjj -- %0d -- %0d", i, pause_override_en[i],start_pause_xoff_timing[i] ), UVM_LOW)
           override_time_en[i] = 1;
           pause_override_en[i] = 0;
         end
@@ -248,7 +252,6 @@ class eth_pause_checker extends uvm_component;
       while (p_time[i] > 0) begin
         tx_idle = is_tx_idle(i);
   
-	#0;
         if (override_time_en[i] && start_pause_xoff_timing[i] == 1) begin
           prev_pause_time[i] = pause_time[i];
           p_time[i] = pause_time[i] * CLOCKS_PER_QUANTA;   // reset countdown to new value
@@ -258,6 +261,7 @@ class eth_pause_checker extends uvm_component;
              $sformatf("Agent - %0d, DUE TO OVERRIDING, UPDATING THE PAUSE TIME = %0d clocks", i, p_time[i]), UVM_LOW)
           override_time_en[i]  = 0;
           override_pending[i]  = 1;
+          timer_upd_done[i]  = 0;
         end
   
         if (tx_idle) begin
@@ -293,9 +297,13 @@ class eth_pause_checker extends uvm_component;
   
       `uvm_info("PCH_DATA", $sformatf("Agent - %0d, Expected clocks = %0d, Actual Clocks Completed= %0d",
                  i, pause_time[i]*CLOCKS_PER_QUANTA, clk[i]), UVM_LOW)
-      @(posedge v_intf[i].TX_CLK); #1step;
-      if (is_tx_idle(i)) begin
-        `uvm_error("PCH_PAUSE_OVERHOLD", $sformatf("Agent - %0d, PAUSE timer expired (Quanta=%0d, %0d clocks) but transmitter still idle -- %0h -- %0h", i, pause_time[i], pause_time[i]*CLOCKS_PER_QUANTA, v_intf[i].TXC, v_intf[i].TXD))
+
+      if (!timer_upd_done[i]) begin
+        @(posedge v_intf[i].TX_CLK);
+        #1step;
+        if (is_tx_idle(i)) begin
+          `uvm_error("PCH_PAUSE_OVERHOLD", $sformatf("Agent - %0d, PAUSE timer expired (Quanta=%0d, %0d clocks) but transmitter still idle -- %0h -- %0h", i, pause_time[i], pause_time[i]*CLOCKS_PER_QUANTA, v_intf[i].TXC, v_intf[i].TXD))
+        end
       end
   
   
