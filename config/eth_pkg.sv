@@ -70,4 +70,5 @@
    `include "../tests/eth_pause_frame_with_updated_pause_time.sv"
    `include "../tests/eth_pause_frame_during_vlan_traffic_test.sv"
    `include "../tests/eth_control_char_data_mismatch_test.sv"
+   `include "../tests/eth_local_and_remote_fault_test.sv"
 

@@ -39,7 +39,10 @@ class eth_drv extends uvm_driver#(eth_seq_item);
   bit tx_busy = 0;
   bit frame_aborted = 0;
 
-  
+  bit local_fault_detect;
+  bit remote_fault_detect;
+  bit frame_in_prg;
+  bit local_fault_en;  
   typedef struct packed {
     logic [`DATA_WIDTH-1:0] txd;
     logic [`CTRL_WIDTH-1:0]  txc;
@@ -82,10 +85,13 @@ class eth_drv extends uvm_driver#(eth_seq_item);
       pause_timer();
       //pfc_timer();
       drain_pause_queue();;
+      local_fault_check();
+      remote_fault_check();      
     join_none
 
     forever begin
       wait(statistics::pause_flag[mac_addr]==0);
+      wait(statistics::local_fault_detect[this.mac_addr] == 0 && statistics::remote_fault_detect[this.mac_addr] == 0);
 
       seq_item_port.get_next_item(tr);
       frame_count++;
@@ -563,6 +569,7 @@ task drive_frame();
 
     xlgmii_word_t word;
     int byte_cnt = 0;
+    int col_cnt;    
     frame_in_progress = 1;
     frame_aborted = 0;
 
@@ -579,18 +586,14 @@ task drive_frame();
               v_intf.drv_cb.TXD <= {8{`IDLE_CH}};
               v_intf.drv_cb.TXC <= 8'hFF;
 
-              `uvm_info("PAUSE_ABORT_FRAME",
-                  "Frame aborted at i=0 due to pause reassertion, driving idle",
+              `uvm_info("PAUSE_ABORT_FRAME", "Frame aborted at i=0 due to pause reassertion, driving idle",
                   UVM_LOW)
            return;
         end
 	
 	end
         word = xlgmii_q[i];
-	   `uvm_info("DRIVE_WORD",
-      $sformatf("WORD=%0d TXD=%016h TXC=%02h",
-                i, word.txd, word.txc),
-      UVM_LOW)
+	`uvm_info("DRIVE_WORD", $sformatf("WORD=%0d TXD=%016h TXC=%02h", i, word.txd, word.txc), UVM_DEBUG)
         for(int lane=0; lane<NUM_LANES; lane++) begin
             // Count only DATA bytes
             if(word.txc[lane] == 0) begin
@@ -623,13 +626,94 @@ task drive_frame();
                 byte_cnt++;
             end
         end
+      if(col_cnt == 3 && this.local_fault_en && statistics::v_uif[mac_addr].tx_good_pkt_count == 1) begin
+        word.txd[31:0] = `LOCAL_FAULT_SEQ; 
+	local_fault_en = 0;
+      end	
+      col_cnt++;
+
+      if(statistics::remote_fault_detect[this.mac_addr] && !remote_fault_detect) begin
+	remote_fault_detect = 1;
+	if(xlgmii_q.size() > 0) frame_in_prg = 1;
+      end else if(statistics::local_fault_detect[this.mac_addr] && !local_fault_detect) begin
+	local_fault_detect = 1;
+	if(xlgmii_q.size() > 0) frame_in_prg = 1;
+      end
+
+      if(local_fault_detect && statistics::local_fault_detect[this.mac_addr]) begin
+        word.txd = {`REMOTE_FAULT_SEQ, `REMOTE_FAULT_SEQ};	
+        word.txc = 8'hFF;
+        frame_aborted = 1;
+      end else if(remote_fault_detect && statistics::remote_fault_detect[this.mac_addr]) begin
+        word.txd = {`IDLE_BYTES, `IDLE_BYTES};	
+        word.txc = 8'hFF;
+      end
+	
         v_intf.drv_cb.TXD <= word.txd;
         v_intf.drv_cb.TXC <= word.txc;
         tr.tx_trace_q.push_back('{t: $time, txd: word.txd, txc: word.txc});
-           end
-	   frame_in_progress = 0;
+    end
+    frame_in_prg = 0;	   
+    frame_in_progress = 0;
 
 endtask
+
+  //*******************************************************//
+  // This task monitors Local Fault status and detects fault
+  // entry and exit conditions. During an active Local Fault,
+  // drives Remote Fault ordered sets when no frame is
+  // currently being transmitted.
+  //*******************************************************//
+  task local_fault_check();
+    forever begin
+      @(v_intf.drv_cb);
+      if(statistics::local_fault_detect[this.mac_addr] && !local_fault_detect && v_intf.drv_cb.TXD == {8{8'h07}} &&
+	v_intf.drv_cb.TXC == 8'hFF) begin
+	local_fault_detect = 1;
+	if(xlgmii_q.size() > 0) frame_in_prg = 1;
+      end
+
+      if(statistics::local_fault_detect[this.mac_addr] == 0 && local_fault_detect) begin
+	local_fault_detect = 0;
+	frame_in_prg = 0;
+      end
+
+      if(local_fault_detect && !frame_in_prg && statistics::local_fault_detect[this.mac_addr]) begin
+        v_intf.drv_cb.TXD <= {`REMOTE_FAULT_SEQ, `REMOTE_FAULT_SEQ};
+	v_intf.drv_cb.TXC <= 8'hFF;
+      end
+
+    end
+  endtask
+
+  //*******************************************************//
+  // This task monitors Remote Fault status and detects fault 
+  // entryand exit conditions. During an active Remote Fault,
+  // drives IDLE characters when no frame transmission
+  // is in progress.
+  //*******************************************************//
+  task remote_fault_check();
+    forever begin
+      @(v_intf.drv_cb);
+      if(statistics::remote_fault_detect[this.mac_addr] && !remote_fault_detect && v_intf.drv_cb.TXD == {8{8'h07}} &&
+        v_intf.drv_cb.TXC == 8'hFF) begin
+	remote_fault_detect = 1;
+	if(xlgmii_q.size() > 0) frame_in_prg = 1;
+      end
+
+      if(statistics::remote_fault_detect[this.mac_addr] == 0 && remote_fault_detect) begin
+	remote_fault_detect = 0;
+	frame_in_prg = 0;
+      end
+
+      if(remote_fault_detect && !frame_in_prg && statistics::remote_fault_detect[this.mac_addr]) begin
+        v_intf.drv_cb.TXD <= {`IDLE_BYTES, `IDLE_BYTES};
+	v_intf.drv_cb.TXC <= 8'hFF;
+      end
+    end    
+  endtask 
+
+
 
   //**********************************************************//
   // This task runs forever and, on every clock edge, updates
@@ -675,6 +759,8 @@ endtask
        statistics::v_uif[mac_addr].tx_pfc_xoff_prio5_count<= statistics::tx_pfc_xoff_prio5_pending[mac_addr];
        statistics::v_uif[mac_addr].tx_pfc_xoff_prio6_count<= statistics::tx_pfc_xoff_prio6_pending[mac_addr];
        statistics::v_uif[mac_addr].tx_pfc_xoff_prio7_count<= statistics::tx_pfc_xoff_prio7_pending[mac_addr];
+       statistics::v_uif[mac_addr].tx_idle_fault_seq_cnt  <= statistics::tx_idle_fault_seq_cnt[mac_addr];
+       statistics::v_uif[mac_addr].tx_remote_fault_seq_cnt<= statistics::tx_remote_fault_seq_cnt[mac_addr];       
        statistics::v_uif[mac_addr].tx_drop_count          <= statistics::tx_drop_pending[mac_addr];
 
        statistics::v_uif[mac_addr].rx_good_pkt_count      <= statistics::rx_good_pkt_pending[mac_addr];
@@ -711,6 +797,8 @@ endtask
        statistics::v_uif[mac_addr].rx_pfc_xoff_prio5_count<= statistics::rx_pfc_xoff_prio5_pending[mac_addr];
        statistics::v_uif[mac_addr].rx_pfc_xoff_prio6_count<= statistics::rx_pfc_xoff_prio6_pending[mac_addr];
        statistics::v_uif[mac_addr].rx_pfc_xoff_prio7_count<= statistics::rx_pfc_xoff_prio7_pending[mac_addr];
+       statistics::v_uif[mac_addr].rx_idle_fault_seq_cnt  <= statistics::rx_idle_fault_seq_cnt[mac_addr];
+       statistics::v_uif[mac_addr].rx_remote_fault_seq_cnt<= statistics::rx_remote_fault_seq_cnt[mac_addr];       
        statistics::v_uif[mac_addr].rx_drop_count          <= statistics::rx_drop_pending[mac_addr];
     end
   endtask
@@ -754,7 +842,9 @@ endtask
     statistics::v_uif[mac_addr].tx_pfc_xoff_prio5_count<= 0;
     statistics::v_uif[mac_addr].tx_pfc_xoff_prio6_count<= 0;
     statistics::v_uif[mac_addr].tx_pfc_xoff_prio7_count<= 0;
-    statistics::v_uif[mac_addr].tx_drop_count<= 0;
+    statistics::v_uif[mac_addr].tx_idle_fault_seq_cnt  <= 0;
+    statistics::v_uif[mac_addr].tx_remote_fault_seq_cnt<= 0;
+    statistics::v_uif[mac_addr].tx_drop_count          <= 0;
 
     statistics::v_uif[mac_addr].rx_good_pkt_count      <= 0;
     statistics::v_uif[mac_addr].rx_bad_pkt_count       <= 0;
@@ -790,7 +880,9 @@ endtask
     statistics::v_uif[mac_addr].rx_pfc_xoff_prio5_count<= 0;
     statistics::v_uif[mac_addr].rx_pfc_xoff_prio6_count<= 0;
     statistics::v_uif[mac_addr].rx_pfc_xoff_prio7_count<= 0;
-    statistics::v_uif[mac_addr].rx_drop_count<= 0;
+    statistics::v_uif[mac_addr].rx_idle_fault_seq_cnt  <= 0;
+    statistics::v_uif[mac_addr].rx_remote_fault_seq_cnt<= 0;
+    statistics::v_uif[mac_addr].rx_drop_count          <= 0;
 
   endfunction 
 
@@ -857,6 +949,8 @@ endtask
     tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[5]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio5_count)};
     tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[6]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio6_count)};
     tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[7]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio7_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Remote Fault Cnt      = %0d\n", statistics::v_uif[mac_addr].tx_remote_fault_seq_cnt)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Idle Fault Cnt        = %0d\n", statistics::v_uif[mac_addr].tx_idle_fault_seq_cnt)};
     tx_rx_report = {tx_rx_report, $sformatf("TX DROP COUNT            = %0d\n", statistics::v_uif[mac_addr].tx_drop_count)};
 
     tx_rx_report = {tx_rx_report, $sformatf(
@@ -896,12 +990,13 @@ endtask
     tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[5]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio5_count)};
     tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[6]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio6_count)};
     tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[7]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio7_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Remote Fault Cnt      = %0d\n", statistics::v_uif[mac_addr].rx_remote_fault_seq_cnt)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Idle Fault Cnt        = %0d\n", statistics::v_uif[mac_addr].rx_idle_fault_seq_cnt)};
     tx_rx_report = {tx_rx_report, $sformatf("RX DROP COUNT            = %0d\n", statistics::v_uif[mac_addr].rx_drop_count)};
     tx_rx_report = {tx_rx_report, "\n================================================"};
 
     `uvm_info("COUNTER_REPORT", tx_rx_report, UVM_NONE)
   endfunction
-  
  
 endclass
 

@@ -61,6 +61,7 @@ set valid_tests {
     eth_pause_frame_during_vlan_traffic_test
     eth_pause_frame_with_updated_pause_time
     eth_pause_reserved_opcode_test
+    eth_local_and_remote_fault_test
      
 }
 # ==========================================

@@ -21,6 +21,8 @@ class statistics;
   static int  pfc_value   [bit [47:0]][8];
   static bit  pfc_flag    [bit [47:0]][8];
   static bit  pfc_update  [bit [47:0]][8];
+  static bit  local_fault_detect [bit [47:0]];
+  static bit  remote_fault_detect [bit [47:0]];
 
   //tx_pending[bit[47:0]]ers;
   static int tx_good_pkt_pending [bit[47:0]];
@@ -59,6 +61,8 @@ class statistics;
   static int tx_pfc_xoff_prio5_pending[bit[47:0]];
   static int tx_pfc_xoff_prio6_pending[bit[47:0]];
   static int tx_pfc_xoff_prio7_pending[bit[47:0]];
+  static int tx_idle_fault_seq_cnt[bit[47:0]];
+  static int tx_remote_fault_seq_cnt[bit[47:0]];
   
   //Rx C int
   static int rx_good_pkt_pending [bit[47:0]];
@@ -97,6 +101,8 @@ class statistics;
   static int rx_pfc_xoff_prio5_pending[bit[47:0]];
   static int rx_pfc_xoff_prio6_pending[bit[47:0]];
   static int rx_pfc_xoff_prio7_pending[bit[47:0]];
+  static int rx_idle_fault_seq_cnt[bit[47:0]];
+  static int rx_remote_fault_seq_cnt[bit[47:0]];
 
 endclass
 

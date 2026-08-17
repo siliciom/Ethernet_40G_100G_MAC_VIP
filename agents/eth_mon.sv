@@ -35,9 +35,13 @@ class eth_mon extends uvm_monitor;
   eth_cnfg cfg;
   bit [47:0] mac_addr;
   bit multi_mac_addr[bit [47:0]];
+  bit remote_fault_detect;
+  bit tx_idle_flt_det;
+  
 
   int rx_pkt_count;
   int tx_pkt_count;
+    int clk;
   localparam int NUM_LANES = `DATA_WIDTH / 8;
   localparam int PREAMBLE_SFD_BYTES = 8;
   localparam bit [15:0] MAC_CTRL_ETHERTYPE = 16'h8808;
@@ -150,6 +154,9 @@ class eth_mon extends uvm_monitor;
     bit [7:0] lane_data = data[lane*8 +: 8];
     bit       lane_ctrl = ctrl[lane]; // MUST be 1 for control byte!
 
+    if(v_intf.tx_mon_cb.TXC == 8'hFF && (v_intf.tx_mon_cb.TXD[31:0] == `IDLE_BYTES || v_intf.tx_mon_cb.TXD[63:32] == `IDLE_BYTES) && remote_fault_detect) begin
+      return;
+    end
     // -----------------------------------------------------------------------
     // CASE 1: IDLE STATE -> Expecting /S/ (0xFB with ctrl == 1)
     // -----------------------------------------------------------------------
@@ -536,6 +543,21 @@ endtask
       // Collect data cycle by cycle using the single RS framer
       do begin
         @(v_intf.tx_mon_cb);
+
+      tx_fault_check();
+      if(tx_idle_flt_det ) begin
+	tx_frame_active = 0;
+	tx_frame_q.delete();
+	statistics::tx_idle_fault_seq_cnt[this.mac_addr]++;
+	continue;
+      end
+   
+      if(v_intf.tx_mon_cb.TXC == 8'hFF && (v_intf.tx_mon_cb.TXD[31:0] == `REMOTE_FAULT_SEQ || v_intf.tx_mon_cb.TXD[63:32] == `REMOTE_FAULT_SEQ)) begin
+	tx_frame_active = 0;
+	tx_frame_q.delete();
+	statistics::tx_remote_fault_seq_cnt[this.mac_addr]++;
+	continue;
+      end
        rs_framer(
          v_intf.tx_mon_cb.TXD,
          v_intf.tx_mon_cb.TXC,
@@ -545,10 +567,9 @@ endtask
          tx_er_seen,
          tx_inv_char_seen,
          tx_pending_term_check  // <--- Passed as ref to track Lane 7 across cycles
-);
-
-       
+      );
       end while (!tx_frame_done);
+
       crc_ok               = 0;
       da_match             = 0;
       invalid_ethertype_tx = 0;
@@ -697,6 +718,7 @@ endtask
 
     bit rx_inv_char_seen;
     bit rx_pending_term_check = 0;
+    bit local_fault_started;
 
    
     forever begin
@@ -705,20 +727,47 @@ endtask
       // Collect data cycle by cycle using the single RS framer
       do begin
         @(v_intf.rx_mon_cb);
-        rs_framer(
-  v_intf.rx_mon_cb.RXD,
-  v_intf.rx_mon_cb.RXC,
-  rx_frame_active,
-  rx_frame_q,
-  rx_frame_done,
-  rx_er_seen,
-  rx_inv_char_seen,
-  rx_pending_term_check  // <--- RX-specific cross-cycle state
-);
+	fork
+          rx_local_fault_check();
+          rx_remote_fault_check();
+	join
 
+
+      if(v_intf.rx_mon_cb.RXC == 8'hFF && (v_intf.rx_mon_cb.RXD[31:0] == `REMOTE_FAULT_SEQ || v_intf.rx_mon_cb.RXD[63:32] == `REMOTE_FAULT_SEQ) && remote_fault_detect) begin
+        statistics::rx_remote_fault_seq_cnt[this.mac_addr]++;
+	rx_frame_active = 0;
+	rx_frame_q.delete();
+        continue;
+      end
+      else if(v_intf.rx_mon_cb.RXC == 8'hFF && (v_intf.rx_mon_cb.RXD[31:0] == `IDLE_BYTES || v_intf.rx_mon_cb.RXD[63:32] == `IDLE_BYTES)  && statistics::local_fault_detect[this.mac_addr] && !local_fault_started) begin
+        statistics::rx_idle_fault_seq_cnt[this.mac_addr]++;
+	rx_frame_active = 0;
+	rx_frame_q.delete();
+	local_fault_started = 1;
+        continue;
+      end else if(local_fault_started) begin
+        if(v_intf.rx_mon_cb.RXC == 8'hFF && (v_intf.rx_mon_cb.RXD[31:0] == `IDLE_BYTES || v_intf.rx_mon_cb.RXD[63:32] == `IDLE_BYTES)) begin
+          statistics::rx_idle_fault_seq_cnt[this.mac_addr]++;
+	  rx_frame_active = 0;
+	  rx_frame_q.delete();
+	  continue;
+	end else
+	  local_fault_started = 0;
+      end
+
+        rs_framer(
+          v_intf.rx_mon_cb.RXD,
+          v_intf.rx_mon_cb.RXC,
+          rx_frame_active,
+          rx_frame_q,
+          rx_frame_done,
+          rx_er_seen,
+          rx_inv_char_seen,
+          rx_pending_term_check  // <--- RX-specific cross-cycle state
+        );
       end while (!rx_frame_done);
 
-       tr = eth_seq_item::type_id::create("tr", this);
+      tr = eth_seq_item::type_id::create("tr", this);
       rx_pkt_count++;
       tr.rx_count = rx_pkt_count;
       tr.agt_addr = mac_addr;
@@ -1148,6 +1197,75 @@ endtask
     return (next_crc == CRC_RESIDUE);
   endfunction
 
+  //*******************************************************//
+  // This task monitors the received data for Local Fault
+  // ordered sets and updates the local fault status.
+  // The fault indication is cleared after FAULT_PERIOD
+  // clock cycles.
+  //*******************************************************//
+  task rx_local_fault_check();
+    bit [63:0] rxd;
+    bit [7:0]  rxc;
+
+      rxd = v_intf.rx_mon_cb.RXD;
+      rxc = v_intf.rx_mon_cb.RXC;
+      if((rxd[31:0] == `LOCAL_FAULT_SEQ || rxd[63:32] == `LOCAL_FAULT_SEQ)) begin
+        statistics::local_fault_detect[this.mac_addr] = 1;
+      end
+      if(clk == `FAULT_PERIOD) begin
+	statistics::local_fault_detect[this.mac_addr] = 0;
+	clk = 0;
+      end else if(statistics::local_fault_detect[this.mac_addr] == 1)
+        clk++;
+  endtask
+
+  //*******************************************************//
+  // This task monitors the received data for Remote Fault
+  // ordered sets and updates the remote fault status.
+  // The fault indication is asserted on detection and
+  // cleared when the fault sequence is no longer present.
+  //*******************************************************//
+  task rx_remote_fault_check();
+    bit [63:0] rxd;
+    bit [7:0]  rxc;
+  
+    rxd = v_intf.rx_mon_cb.RXD;
+    rxc = v_intf.rx_mon_cb.RXC;
+  
+    if(rxc == 8'hFF && (rxd[31:0] == `REMOTE_FAULT_SEQ || rxd[63:32] == `REMOTE_FAULT_SEQ) && remote_fault_detect == 0) begin
+      remote_fault_detect = 1;
+      statistics::remote_fault_detect[this.mac_addr] = 1;
+    end else if(!(rxc == 8'hFF && (rxd[31:0] == `REMOTE_FAULT_SEQ || rxd[63:32] == `REMOTE_FAULT_SEQ)) && remote_fault_detect == 1) begin
+      remote_fault_detect = 0;
+      statistics::remote_fault_detect[this.mac_addr] = 0;
+    end
+  
+  endtask
+
+  //*******************************************************//
+  // This task monitors the transmit interface during a
+  // Remote Fault condition and checks for IDLE character
+  // transmission. It updates the transmit idle fault
+  // detection status accordingly.
+  //*******************************************************//
+  task tx_fault_check();
+    bit [63:0] txd;
+    bit [7:0]  txc;
+
+    txd = v_intf.tx_mon_cb.TXD;
+    txc = v_intf.tx_mon_cb.TXC;
+
+    if(statistics::remote_fault_detect[this.mac_addr]) begin
+      if(txc == 8'hFF && (txd[31:0] == `IDLE_BYTES || txd[63:32] == `IDLE_BYTES)) begin
+         tx_idle_flt_det = 1;       
+      end
+    end else if(!((txc == 8'hFF && (txd[31:0] == `IDLE_BYTES || txd[63:32] == `IDLE_BYTES))) && tx_idle_flt_det) begin
+       tx_idle_flt_det = 0;       
+    end
+  endtask
+
+  
 endclass
+
 
 

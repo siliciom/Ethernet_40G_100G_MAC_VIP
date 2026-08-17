@@ -47,6 +47,8 @@ interface eth_ui_interface();
   logic [31:0] tx_pfc_xoff_prio5_count;
   logic [31:0] tx_pfc_xoff_prio6_count;
   logic [31:0] tx_pfc_xoff_prio7_count;
+  logic [31:0] tx_idle_fault_seq_cnt;
+  logic [31:0] tx_remote_fault_seq_cnt;
   
   
   //Rx Counters
@@ -85,6 +87,8 @@ interface eth_ui_interface();
   logic [31:0] rx_pfc_xoff_prio5_count;
   logic [31:0] rx_pfc_xoff_prio6_count;
   logic [31:0] rx_pfc_xoff_prio7_count;
+  logic [31:0] rx_idle_fault_seq_cnt;
+  logic [31:0] rx_remote_fault_seq_cnt;
     
 endinterface
 

@@ -19,6 +19,9 @@
 `define ERROR_CH 8'hFE
 `define PREAMBLE 8'h55
 `define SFD 8'hD5
+`define REMOTE_FAULT_SEQ 32'h9c_00_00_02
+`define LOCAL_FAULT_SEQ 32'h9c_00_00_01
+`define IDLE_BYTES 32'h07_07_07_07
 `define PAUSE_PAYLOAD_SIZE 42
 `define PFC_PAYLOAD_SIZE 26
 `define VLAN_PAYLOAD_SIZE 42
@@ -29,7 +32,8 @@
 `define MAC_ADDR 48
 `define RESET_PERIOD 5
 `define NUM_LANES = `DATA_WIDTH / 8;
-`define NO_OF_PKTS 1000
+`define FAULT_PERIOD 500
+`define NO_OF_PKTS 100
 
 typedef enum {
   NORMAL_FRAME,

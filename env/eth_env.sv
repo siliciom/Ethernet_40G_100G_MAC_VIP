@@ -75,6 +75,10 @@ class eth_env extends uvm_env;
         statistics::pfc_value[seq_item_h.mac_addr[i]][j] = 0;
         statistics::pfc_update[seq_item_h.mac_addr[i]][j] = 0;
       end
+
+
+      statistics::local_fault_detect[seq_item_h.mac_addr[i]]      = 0;
+      statistics::remote_fault_detect[seq_item_h.mac_addr[i]]      = 0;      
       statistics::tx_good_pkt_pending[seq_item_h.mac_addr[i]]      = 0;
       statistics::tx_bad_pkt_pending[seq_item_h.mac_addr[i]]       = 0;
       statistics::tx_unicast_pending[seq_item_h.mac_addr[i]]       = 0;
@@ -111,6 +115,8 @@ class eth_env extends uvm_env;
       statistics::tx_pfc_xoff_prio5_pending[seq_item_h.mac_addr[i]] = 0;
       statistics::tx_pfc_xoff_prio6_pending[seq_item_h.mac_addr[i]] = 0;
       statistics::tx_pfc_xoff_prio7_pending[seq_item_h.mac_addr[i]] = 0;
+      statistics::tx_idle_fault_seq_cnt[seq_item_h.mac_addr[i]]     = 0;
+      statistics::tx_remote_fault_seq_cnt[seq_item_h.mac_addr[i]]   = 0;
 
       statistics::rx_good_pkt_pending[seq_item_h.mac_addr[i]]      = 0;
       statistics::rx_bad_pkt_pending[seq_item_h.mac_addr[i]]       = 0;
@@ -148,6 +154,8 @@ class eth_env extends uvm_env;
       statistics::rx_pfc_xoff_prio5_pending[seq_item_h.mac_addr[i]] = 0;
       statistics::rx_pfc_xoff_prio6_pending[seq_item_h.mac_addr[i]] = 0;
       statistics::rx_pfc_xoff_prio7_pending[seq_item_h.mac_addr[i]] = 0;
+      statistics::rx_idle_fault_seq_cnt[seq_item_h.mac_addr[i]]     = 0;
+      statistics::rx_remote_fault_seq_cnt[seq_item_h.mac_addr[i]]   = 0;
     end
 
   endfunction  
