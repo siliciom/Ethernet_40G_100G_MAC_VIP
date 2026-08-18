@@ -21,7 +21,7 @@ class eth_multicast_frame_test extends eth_base_test;
       vseq.no_of_pkts = `NO_OF_PKTS;
       vseq.frame_mode = base_virtual_seq::MULTICAST;
       vseq.start(env_h.vseqr_h);    
-    #100;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask    
 endclass

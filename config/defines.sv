@@ -33,7 +33,12 @@
 `define RESET_PERIOD 5
 `define NUM_LANES = `DATA_WIDTH / 8;
 `define FAULT_PERIOD 500
-`define NO_OF_PKTS 100
+`define NO_OF_PKTS 1000
+
+`define COMPARE_COUNTER(tx_cnt, rx_cnt, name) \
+  if(statistics::tx_cnt[mac0_addr] != statistics::rx_cnt[mac1_addr]) \
+    `uvm_error("COUNTERS_ERR", $sformatf("%s mismatch : TX_MAC[%0d]=%0d RX_MAC[%0d]=%0d", \
+      name, i, statistics::tx_cnt[mac0_addr],  j, statistics::rx_cnt[mac1_addr]))
 
 typedef enum {
   NORMAL_FRAME,

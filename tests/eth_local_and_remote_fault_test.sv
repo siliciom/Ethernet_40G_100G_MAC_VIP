@@ -10,12 +10,21 @@ class eth_local_and_remote_fault_test extends eth_base_test;
     
   task run_phase(uvm_phase phase);
     virtual_seq vseq;
+    foreach(env_h.agnt_mac[i]) begin
+      uvm_root::get().set_report_severity_id_override(UVM_ERROR,"TX_CTRL_DATA_MISMATCH",UVM_WARNING);
+      uvm_root::get().set_report_severity_id_override(UVM_ERROR,"RX_CTRL_DATA_MISMATCH",UVM_WARNING);
+      uvm_root::get().set_report_severity_id_override(UVM_ERROR,"TX_START_AFTER_IDLE_ERR",UVM_WARNING);
+      uvm_root::get().set_report_severity_id_override(UVM_ERROR,"RX_START_AFTER_IDLE_ERR",UVM_WARNING);
+      uvm_root::get().set_report_severity_id_override(UVM_ERROR,"TX_START_TERM_ERR",UVM_WARNING);
+      uvm_root::get().set_report_severity_id_override(UVM_ERROR,"RX_START_TERM_ERR",UVM_WARNING);
+    end	  
+    env_h.ipg_chkr_h.ipg_checker_en = 0;
     phase.raise_objection(this); 
       vseq = virtual_seq::type_id::create("vseq");
       vseq.no_of_pkts = `NO_OF_PKTS;
       env_h.agnt_mac[1].drv_h.local_fault_en = 1;
       vseq.start(env_h.vseqr_h);  
-    #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask  
 endclass

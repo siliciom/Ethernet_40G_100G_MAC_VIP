@@ -25,7 +25,7 @@ class eth_pause_frame_basic_xoff_xon_test extends eth_base_test;
     vseq.pause_normal_traffic = 1;
     vseq.normal_xon_xoff_en = 1;
     vseq.start(env_h.vseqr_h);
-    #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask    
 endclass

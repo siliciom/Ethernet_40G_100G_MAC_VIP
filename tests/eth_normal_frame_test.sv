@@ -18,12 +18,13 @@ class eth_normal_frame_test extends eth_base_test;
     
   task run_phase(uvm_phase phase);
     virtual_seq vseq;
+
     phase.raise_objection(this); 
       vseq = virtual_seq::type_id::create("vseq");
       vseq.no_of_pkts = `NO_OF_PKTS;
       vseq.frame_mode = base_virtual_seq::NORMAL_MODE;
       vseq.start(env_h.vseqr_h);  
-    #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask  
 endclass

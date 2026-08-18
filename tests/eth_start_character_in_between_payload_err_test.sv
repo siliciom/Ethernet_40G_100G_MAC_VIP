@@ -29,7 +29,16 @@ class eth_start_character_in_between_payload_err_test extends eth_base_test;
     foreach(env_h.agnt_mac[i]) begin
       env_h.agnt_mac[i].mon_h.set_report_severity_id_override(UVM_ERROR,"RS_UNEXPECTED_START",UVM_WARNING);
       env_h.agnt_mac[i].mon_h.set_report_severity_id_override(UVM_ERROR,"TX_CRC_ERR",UVM_WARNING);
-    end  
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"TX_START_TERM_ERR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"RX_START_TERM_ERR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"FB_LANE_ERROR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"RX_FB_LANE_ERROR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"TX_START_VEC_ERR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"TX_START_AFTER_IDLE_ERR",UVM_WARNING);
+ 
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"RX_START_VEC_ERR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"RX_START_AFTER_IDLE_ERR",UVM_WARNING);
+    end
     phase.raise_objection(this);
       vseq = virtual_seq::type_id::create("vseq");
       vseq.frame_mode = base_virtual_seq::DOUBLE_START_CHAR;
@@ -38,7 +47,7 @@ class eth_start_character_in_between_payload_err_test extends eth_base_test;
       vseq.wt_dist0 = 30;
       vseq.wt_dist1 = 70;
       vseq.start(env_h.vseqr_h);
-    #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask  
 endclass

@@ -28,6 +28,8 @@ class eth_invalid_control_character_test extends eth_base_test;
       env_h.agnt_mac[i].mon_h.set_report_severity_id_override(UVM_ERROR,"RS_INVALID_CTRL_CHAR",UVM_WARNING);
       env_h.agnt_mac[i].mon_h.set_report_severity_id_override(UVM_ERROR,"TX_PREAMBLE_ERR",UVM_WARNING);
       env_h.agnt_mac[i].mon_h.set_report_severity_id_override(UVM_ERROR,"RX_PREAMBLE_ERR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"TX_CTRL_DATA_MISMATCH",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"RX_CTRL_DATA_MISMATCH",UVM_WARNING);
     end
     phase.raise_objection(this);
       vseq = virtual_seq::type_id::create("vseq");
@@ -37,7 +39,7 @@ class eth_invalid_control_character_test extends eth_base_test;
       vseq.wt_dist0 = 27;
       vseq.wt_dist1 = 69;
       vseq.start(env_h.vseqr_h);
-    #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask  
 endclass

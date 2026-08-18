@@ -33,6 +33,19 @@ class eth_base_test extends uvm_test;
   function void end_of_elaboration_phase(uvm_phase phase);
     super.end_of_elaboration_phase(phase);
     uvm_top.print_topology();
+    env_h.ipg_chkr_h.ipg_checker_en = 1;
   endfunction
+
+task wait_until_complete();
+      for (int i = 0; i < `NO_OF_AGENTS; i++) begin
+        fork
+          automatic int idx = i;
+          wait(env_h.agnt_mac[idx].drv_h.frame_in_progress == 0);
+          wait(env_h.agnt_mac[idx].mon_h.rx_frame_q.size() == 0);
+        join
+      end
+    #1.6;
+endtask
+
 endclass
 

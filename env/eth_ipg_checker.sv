@@ -40,7 +40,6 @@ class eth_ipg_checker extends uvm_component;
     forever begin
       if(v_intf[i].RXC[0] == 1 && v_intf[i].RXD[7:0] == `START_CH) begin
 	frame_start[i] = 1;
-	`uvm_info("", $sformatf("55555555555555555555555555555555555"), UVM_LOW)
       end
       if(frame_start[i] == 1) begin
 	data = v_intf[i].RXD;
@@ -51,11 +50,9 @@ class eth_ipg_checker extends uvm_component;
 
 	  if(lane_ctrl == 1 && lane_data == 8'hfd) begin
 	    term_char_cnt[i]++;
-	`uvm_info("", $sformatf("88888888888888888888888888888888888 %0d",term_char_cnt[i]), UVM_LOW)
 	  end
 	  else if(lane_ctrl == 1 && lane_data == 8'h07) begin
 	    ipg_cnt[i]++;
-	`uvm_info("", $sformatf("66666666666666666666666666666666666 %0d",ipg_cnt[i]), UVM_LOW)
 	  end
 
 	  if(term_char_cnt[i] == `NO_OF_PKTS) begin

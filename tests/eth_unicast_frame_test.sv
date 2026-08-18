@@ -23,7 +23,7 @@ class eth_unicast_frame_test extends eth_base_test;
       vseq.no_of_pkts = `NO_OF_PKTS;
       vseq.frame_mode = base_virtual_seq::NORMAL_MODE;
       vseq.start(env_h.vseqr_h);  
-    #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask  
 endclass

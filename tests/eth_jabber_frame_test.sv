@@ -30,7 +30,7 @@ class eth_jabber_frame_test extends eth_base_test;
     vseq.wt_dist0 = 30;
     vseq.wt_dist1 = 70;
     vseq.start(env_h.vseqr_h);    
-    #100;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask    
 endclass

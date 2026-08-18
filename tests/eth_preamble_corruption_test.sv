@@ -26,6 +26,8 @@ class eth_preamble_corruption_test extends eth_base_test;
     foreach(env_h.agnt_mac[i]) begin
       env_h.agnt_mac[i].mon_h.set_report_severity_id_override(UVM_ERROR,"TX_PREAMBLE_ERR",UVM_WARNING);
       env_h.agnt_mac[i].mon_h.set_report_severity_id_override(UVM_ERROR,"RX_PREAMBLE_ERR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"TX_START_VEC_ERR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"RX_START_VEC_ERR",UVM_WARNING);
     end
     phase.raise_objection(this);
       vseq = virtual_seq::type_id::create("vseq");
@@ -35,7 +37,7 @@ class eth_preamble_corruption_test extends eth_base_test;
       vseq.wt_dist0 = 40;
       vseq.wt_dist1 = 60;
       vseq.start(env_h.vseqr_h);
-    #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask  
 endclass

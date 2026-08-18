@@ -27,7 +27,10 @@ class eth_control_char_data_mismatch_test extends eth_base_test;
     foreach(env_h.agnt_mac[i]) begin
       env_h.agnt_mac[i].mon_h.set_report_severity_id_override(UVM_ERROR,"RS_UNKNOWN_CTRL",UVM_WARNING);
       env_h.agnt_mac[i].mon_h.set_report_severity_id_override(UVM_ERROR,"TX_CRC_ERR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"TX_CTRL_DATA_MISMATCH",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"RX_CTRL_DATA_MISMATCH",UVM_WARNING);
     end
+    env_h.ipg_chkr_h.ipg_checker_en = 0;
     phase.raise_objection(this);
       vseq = virtual_seq::type_id::create("vseq");
       vseq.frame_mode = base_virtual_seq::CONTROL_DATA_MISMATCH;
@@ -36,7 +39,7 @@ class eth_control_char_data_mismatch_test extends eth_base_test;
       vseq.wt_dist0 = 30;
       vseq.wt_dist1 = 70;
       vseq.start(env_h.vseqr_h);
-    #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask  
 endclass

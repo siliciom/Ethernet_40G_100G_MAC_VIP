@@ -117,6 +117,7 @@ class eth_mon extends uvm_monitor;
   frame_done         = 0;
   inv_ctrl_char_seen = 0;
 
+  
   // =========================================================================
   // STEP 1: Cross-Cycle Validation for /T/ (0xFD) on Lane 7 of Prev Cycle
   // =========================================================================
@@ -157,6 +158,12 @@ class eth_mon extends uvm_monitor;
     if(v_intf.tx_mon_cb.TXC == 8'hFF && (v_intf.tx_mon_cb.TXD[31:0] == `IDLE_BYTES || v_intf.tx_mon_cb.TXD[63:32] == `IDLE_BYTES) && remote_fault_detect) begin
       return;
     end
+    if(v_intf.tx_mon_cb.TXC == 8'hFF && (v_intf.tx_mon_cb.TXD[31:0] == `LOCAL_FAULT_SEQ || v_intf.tx_mon_cb.TXD[63:32] == `LOCAL_FAULT_SEQ)) begin
+      return;
+    end      
+    if(v_intf.rx_mon_cb.RXC == 8'hFF && (v_intf.rx_mon_cb.RXD[31:0] == `LOCAL_FAULT_SEQ || v_intf.rx_mon_cb.RXD[63:32] == `LOCAL_FAULT_SEQ)) begin
+      return;
+    end      
     // -----------------------------------------------------------------------
     // CASE 1: IDLE STATE -> Expecting /S/ (0xFB with ctrl == 1)
     // -----------------------------------------------------------------------
@@ -452,7 +459,6 @@ endtask
         else       statistics::rx_drop_pending[mac_addr]++;
       end
 
-      eth_packet_tracker::print_packet(side, full_name, tr);
       return 1;
     end
 
@@ -490,7 +496,6 @@ endtask
       if (is_tx) statistics::tx_drop_pending[mac_addr]++;
       else       statistics::rx_drop_pending[mac_addr]++;
 
-      eth_packet_tracker::print_packet(side, full_name, tr);
       return 1;
     end
 
@@ -540,6 +545,7 @@ endtask
     
     forever begin
       tx_er_seen = 0;
+      tx_frame_q.delete();
       // Collect data cycle by cycle using the single RS framer
       do begin
         @(v_intf.tx_mon_cb);
@@ -680,7 +686,6 @@ endtask
       if (pkt_bad) statistics::tx_bad_pkt_pending[mac_addr]++;
       else         statistics::tx_good_pkt_pending[mac_addr]++;
       
-      eth_packet_tracker::print_packet("TX", this.get_full_name(), tr);
       tx_ap.write(tr);
     end
   endtask
@@ -723,6 +728,7 @@ endtask
    
     forever begin
       rx_er_seen = 0;
+      rx_frame_q.delete();
 
       // Collect data cycle by cycle using the single RS framer
       do begin
@@ -776,7 +782,6 @@ endtask
         `uvm_error("RX_SHORT_FRAME", $sformatf("Frame smaller than L2 header, size=%0d", rx_frame_q.size()))
         statistics::rx_drop_pending[mac_addr]++;
         statistics::rx_bad_pkt_pending[mac_addr]++;
-        eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
         rx_frame_q.delete();
         continue;
       end
@@ -804,7 +809,6 @@ endtask
         if (bad_sfd)      `uvm_error("RX_SFD_ERR", $sformatf("Bad SFD : Dropping packet frame_size=%0d", rx_frame_q.size()))
         statistics::rx_drop_pending[mac_addr]++;
         statistics::rx_bad_pkt_pending[mac_addr]++;
-        eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
         continue;
       end
 
@@ -815,7 +819,6 @@ endtask
         statistics::rx_bad_pkt_pending[mac_addr]++;
         `uvm_error("RX_INVALID_DA", $sformatf("Invalid DA = %h", rx_da))
         statistics::rx_drop_pending[mac_addr]++;
-        eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
         continue;
       end
 
@@ -826,7 +829,6 @@ endtask
         statistics::rx_bad_pkt_pending[mac_addr]++;
         `uvm_error("RX_UNDEFINED_ETHERTYPE", $sformatf("Dropping packet : Undefined EtherType = %0d", tr.ether_type))
         statistics::rx_drop_pending[mac_addr]++;
-        eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
         continue;
       end
 
@@ -835,7 +837,6 @@ endtask
         addr_classify_rx(tr);
         `uvm_error("RX_LEN_DATA_MISMATCH", $sformatf("Length mismatch DA=%h SA=%h payload=%0d", tr.da, tr.sa, tr.payload.size()))
         statistics::rx_drop_pending[mac_addr]++;
-        eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
         continue;
       end
 
@@ -845,7 +846,6 @@ endtask
           statistics::rx_bad_pkt_pending[mac_addr]++;
           addr_classify_rx(tr);
           statistics::rx_drop_pending[mac_addr]++;
-          eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
           continue;
         end
         else if (tr.TPID != SVLAN_TPID && !tr.pause_frame_en) begin
@@ -853,7 +853,6 @@ endtask
           statistics::rx_bad_pkt_pending[mac_addr]++;
           addr_classify_rx(tr);
           statistics::rx_drop_pending[mac_addr]++;
-          eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
           continue;
         end
         else begin
@@ -864,7 +863,6 @@ endtask
         statistics::rx_bad_pkt_pending[mac_addr]++;
         addr_classify_rx(tr);
         statistics::rx_drop_pending[mac_addr]++;
-        eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
         continue;
       end
       if (tr.outer_vlan_en) begin
@@ -890,7 +888,6 @@ endtask
           statistics::rx_runt_pending[mac_addr]++;
 
         statistics::rx_drop_pending[mac_addr]++;
-        eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
         continue;
       end
 
@@ -905,7 +902,6 @@ endtask
           statistics::rx_bad_pkt_pending[mac_addr]++;
           addr_classify_rx(tr);
           `uvm_error("RX_LONG_PKT", $sformatf("Long packet payload=%0d", tr.payload.size()))
-          eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
           continue;
         end
         else begin
@@ -919,7 +915,6 @@ endtask
         statistics::rx_bad_pkt_pending[mac_addr]++;
         `uvm_error("RX_CRC_DROP", $sformatf("Dropping packet : Bad FCS DA=%h SA=%h CRC=%h", tr.da, tr.sa, tr.crc))
         statistics::rx_drop_pending[mac_addr]++;
-        eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
         continue;
       end
 
@@ -938,7 +933,6 @@ endtask
       $display("[MON_RX_STATS] Time:%0t | MAC:%012h | RX Good Pkts:%0d | RX Unicast Pkts:%0d",
         $time, mac_addr, statistics::rx_good_pkt_pending[mac_addr], statistics::rx_unicast_pending[mac_addr]);
 
-      eth_packet_tracker::print_packet("RX", this.get_full_name(), tr);
       rx_ap.write(tr);
     end
   endtask
@@ -1209,7 +1203,7 @@ endtask
 
       rxd = v_intf.rx_mon_cb.RXD;
       rxc = v_intf.rx_mon_cb.RXC;
-      if((rxd[31:0] == `LOCAL_FAULT_SEQ || rxd[63:32] == `LOCAL_FAULT_SEQ)) begin
+      if((rxd[31:0] == `LOCAL_FAULT_SEQ && rxc[3:0] == 8'hF) || (rxd[63:32] == `LOCAL_FAULT_SEQ && rxc[7:4] == 8'hF)) begin
         statistics::local_fault_detect[this.mac_addr] = 1;
       end
       if(clk == `FAULT_PERIOD) begin

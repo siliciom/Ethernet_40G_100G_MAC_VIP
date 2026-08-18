@@ -26,7 +26,12 @@ class eth_missing_terminate_character_test extends eth_base_test;
     virtual_seq vseq;
     foreach(env_h.agnt_mac[i]) begin
       env_h.agnt_mac[i].mon_h.set_report_severity_id_override(UVM_ERROR,"RS_MISSING_TERM_ERR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"TX_TERM_TO_IDLE_VIOLATION",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"RX_TERM_TO_IDLE_VIOLATION",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"TX_START_TERM_ERR",UVM_WARNING);
+      uvm_top.set_report_severity_id_override(UVM_ERROR,"RX_START_TERM_ERR",UVM_WARNING);
     end
+    env_h.ipg_chkr_h.ipg_checker_en = 0;
     phase.raise_objection(this);
       vseq = virtual_seq::type_id::create("vseq");
       vseq.frame_mode = base_virtual_seq::NO_TERMINATE_CHAR;
@@ -35,7 +40,7 @@ class eth_missing_terminate_character_test extends eth_base_test;
       vseq.wt_dist0 = 30;
       vseq.wt_dist1 = 70;
       vseq.start(env_h.vseqr_h);
-    #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask  
 endclass

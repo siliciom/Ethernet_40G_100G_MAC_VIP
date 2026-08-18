@@ -35,7 +35,7 @@ class eth_bad_fcs_test extends eth_base_test;
       vseq.wt_dist0 = 40;
       vseq.wt_dist1 = 60;   
       vseq.start(env_h.vseqr_h);    
-    #100;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask    
 endclass

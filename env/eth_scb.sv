@@ -26,6 +26,8 @@ class eth_scb extends uvm_scoreboard;
   // RX ARRAY [source_agent_id][destination_agent_id][transaction_number]
   eth_seq_item rx_aa[int][int][int];
   int matched_pkt_count = 0;
+  bit mac_addr_arr[bit[47:0]];
+  bit k;
 
   function new(string name = "eth_scb", uvm_component parent = null);
     super.new(name,parent);
@@ -51,6 +53,8 @@ class eth_scb extends uvm_scoreboard;
     int txn_no;
 
     src_id = source_address(tx_tr);
+    if(!(mac_addr_arr.exists(tx_tr.sa)))
+      mac_addr_arr[tx_tr.sa] = 1;
     txn_no = tx_tr.tx_count;
     if(is_broadcast_addr(tx_tr.da)) begin
       foreach(ai_2[i]) begin
@@ -214,7 +218,11 @@ class eth_scb extends uvm_scoreboard;
     int tx_pkt_left;
     int rx_pkt_left;
     super.report_phase(phase);
-
+    
+    if(`NO_OF_AGENTS == 2) begin
+      for(int i = 0; i < `NO_OF_AGENTS; i++)
+	compare_counters(i);
+    end
     // Get testcase name
     if (!$value$plusargs("UVM_TESTNAME=%s", test_name))
       test_name = "UNKNOWN_TEST";
@@ -493,6 +501,59 @@ function void compare_packet(
         return i;
     end
   endfunction
+ 
+  function void compare_counters(int i);
+    bit [47:0] mac0_addr;
+    bit [47:0] mac1_addr;
+    bit j;
+    bit [47:0] index;
+  
+    j = ~(bit'(i));
+    mac_addr_arr.first(index);
+    mac0_addr = index;
+    mac_addr_arr.last(index);  
+    mac1_addr = index;
 
+    `COMPARE_COUNTER(tx_good_pkt_pending,        rx_good_pkt_pending,        "GOOD_PKT")
+    `COMPARE_COUNTER(tx_bad_pkt_pending,         rx_bad_pkt_pending,         "BAD_PKT")
+    `COMPARE_COUNTER(tx_unicast_pending,         rx_unicast_pending,         "UNICAST")
+    `COMPARE_COUNTER(tx_multicast_pending,       rx_multicast_pending,       "MULTICAST")
+    `COMPARE_COUNTER(tx_broadcast_pending,       rx_broadcast_pending,       "BROADCAST")
+    `COMPARE_COUNTER(tx_runt_pending,            rx_runt_pending,            "RUNT")
+    `COMPARE_COUNTER(tx_fragment_pending,        rx_fragment_pending,        "FRAGMENT")
+    `COMPARE_COUNTER(tx_jumbo_pending,           rx_jumbo_pending,           "JUMBO")
+    `COMPARE_COUNTER(tx_super_jumbo_pending,     rx_super_jumbo_pending,     "SUPER_JUMBO")
+    `COMPARE_COUNTER(tx_jabber_pending,          rx_jabber_pending,          "JABBER")
+    `COMPARE_COUNTER(tx_pause_pending,           rx_pause_pending,           "PAUSE")
+    `COMPARE_COUNTER(tx_vlan_pending,            rx_vlan_pending,            "VLAN")
+    `COMPARE_COUNTER(tx_ipg_violation_pending,   rx_ipg_violation_pending,   "IPG_VIOLATION")
+    `COMPARE_COUNTER(tx_pfc_xon_pending,         rx_pfc_xon_pending,         "PFC_XON")
+    `COMPARE_COUNTER(tx_pfc_xoff_pending,        rx_pfc_xoff_pending,        "PFC_XOFF")
+    `COMPARE_COUNTER(tx_carrier_ext_pending,     rx_carrier_ext_pending,     "CARRIER_EXT")
+    `COMPARE_COUNTER(tx_pause_xon_pending,       rx_pause_xon_pending,       "PAUSE_XON")
+    `COMPARE_COUNTER(tx_pause_xoff_pending,      rx_pause_xoff_pending,      "PAUSE_XOFF")
+    `COMPARE_COUNTER(tx_control_pkt_pending,     rx_control_pkt_pending,     "CONTROL_PKT")
+    
+    `COMPARE_COUNTER(tx_pfc_xon_prio0_pending,   rx_pfc_xon_prio0_pending,   "PFC_XON_PRIO0")
+    `COMPARE_COUNTER(tx_pfc_xon_prio1_pending,   rx_pfc_xon_prio1_pending,   "PFC_XON_PRIO1")
+    `COMPARE_COUNTER(tx_pfc_xon_prio2_pending,   rx_pfc_xon_prio2_pending,   "PFC_XON_PRIO2")
+    `COMPARE_COUNTER(tx_pfc_xon_prio3_pending,   rx_pfc_xon_prio3_pending,   "PFC_XON_PRIO3")
+    `COMPARE_COUNTER(tx_pfc_xon_prio4_pending,   rx_pfc_xon_prio4_pending,   "PFC_XON_PRIO4")
+    `COMPARE_COUNTER(tx_pfc_xon_prio5_pending,   rx_pfc_xon_prio5_pending,   "PFC_XON_PRIO5")
+    `COMPARE_COUNTER(tx_pfc_xon_prio6_pending,   rx_pfc_xon_prio6_pending,   "PFC_XON_PRIO6")
+    `COMPARE_COUNTER(tx_pfc_xon_prio7_pending,   rx_pfc_xon_prio7_pending,   "PFC_XON_PRIO7")
+    
+    `COMPARE_COUNTER(tx_pfc_xoff_prio0_pending,  rx_pfc_xoff_prio0_pending,  "PFC_XOFF_PRIO0")
+    `COMPARE_COUNTER(tx_pfc_xoff_prio1_pending,  rx_pfc_xoff_prio1_pending,  "PFC_XOFF_PRIO1")
+    `COMPARE_COUNTER(tx_pfc_xoff_prio2_pending,  rx_pfc_xoff_prio2_pending,  "PFC_XOFF_PRIO2")
+    `COMPARE_COUNTER(tx_pfc_xoff_prio3_pending,  rx_pfc_xoff_prio3_pending,  "PFC_XOFF_PRIO3")
+    `COMPARE_COUNTER(tx_pfc_xoff_prio4_pending,  rx_pfc_xoff_prio4_pending,  "PFC_XOFF_PRIO4")
+    `COMPARE_COUNTER(tx_pfc_xoff_prio5_pending,  rx_pfc_xoff_prio5_pending,  "PFC_XOFF_PRIO5")
+    `COMPARE_COUNTER(tx_pfc_xoff_prio6_pending,  rx_pfc_xoff_prio6_pending,  "PFC_XOFF_PRIO6")
+    `COMPARE_COUNTER(tx_pfc_xoff_prio7_pending,  rx_pfc_xoff_prio7_pending,  "PFC_XOFF_PRIO7")
+    
+    `COMPARE_COUNTER(tx_idle_fault_seq_cnt,      rx_idle_fault_seq_cnt,      "IDLE_FAULT_SEQ")
+    `COMPARE_COUNTER(tx_remote_fault_seq_cnt,    rx_remote_fault_seq_cnt,    "REMOTE_FAULT_SEQ")
+  endfunction
 endclass
 

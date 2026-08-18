@@ -120,7 +120,6 @@ class eth_drv extends uvm_driver#(eth_seq_item);
 	    // tx_busy=0; 
 	  send_dic_idle();
 	  // tx_busy=0; 
-	  eth_packet_tracker::print_packet("TX",this.get_full_name(),tr);
 	  tx_sem.put(1);
 	end
       end 
@@ -627,7 +626,8 @@ task drive_frame();
             end
         end
       if(col_cnt == 3 && this.local_fault_en && statistics::v_uif[mac_addr].tx_good_pkt_count == 1) begin
-        word.txd[31:0] = `LOCAL_FAULT_SEQ; 
+        word.txd = {`LOCAL_FAULT_SEQ, `LOCAL_FAULT_SEQ};	
+        word.txc = 8'hFF;
 	local_fault_en = 0;
       end	
       col_cnt++;

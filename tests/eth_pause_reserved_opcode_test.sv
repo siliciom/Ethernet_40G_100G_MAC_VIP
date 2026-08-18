@@ -26,7 +26,7 @@ class eth_pause_reserved_opcode_test extends eth_base_test;
       vseq.pfc_with_vlan_traffic =0;
       vseq.pause_rsd_en=1;
       vseq.start(env_h.vseqr_h);
-      #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask    
 endclass

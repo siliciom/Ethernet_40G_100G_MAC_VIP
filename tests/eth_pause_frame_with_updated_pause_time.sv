@@ -28,7 +28,7 @@ class eth_pause_frame_with_updated_pause_time extends eth_base_test;
     vseq.pfc_with_vlan_traffic =0;
     vseq.pause_update_time_en =1;
     vseq.start(env_h.vseqr_h); 
-    #200;
+      wait_until_complete();
     phase.drop_objection(this);
   endtask    
 endclass
