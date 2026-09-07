@@ -1,16 +1,17 @@
 class eth_ipg_checker extends uvm_component;
   `uvm_component_utils(eth_ipg_checker)
-
+ 
   bit frame_start[`NO_OF_AGENTS];
   int ipg_cnt[`NO_OF_AGENTS];
+  int frm_ipg_cnt[`NO_OF_AGENTS];
   int term_char_cnt[`NO_OF_AGENTS];
   bit ipg_checker_en;
   virtual eth_interface v_intf[`NO_OF_AGENTS];
-
+ 
   function new (string name = "eth_ipg_checker", uvm_component parent = null);
     super.new(name,parent);
   endfunction
-
+ 
   function void build_phase(uvm_phase phase);
     super.build_phase(phase);
     for (int i = 0; i < `NO_OF_AGENTS; i++) begin
@@ -18,7 +19,7 @@ class eth_ipg_checker extends uvm_component;
         `uvm_fatal("IPG_CHECKER", $sformatf("Unable to get vif_%0d", i))
     end    
   endfunction    
-
+ 
   task run_phase(uvm_phase phase);
     wait(v_intf[0].rst);
       for (int i = 0; i < `NO_OF_AGENTS; i++) begin
@@ -27,13 +28,13 @@ class eth_ipg_checker extends uvm_component;
           check_ipg(agnt);
         join_none
       end
-
+ 
   endtask
-
+ 
   task check_ipg(int i);
     bit [`DATA_WIDTH-1 : 0] data;
     bit [`CTRL_WIDTH-1 : 0] ctrl;
-
+ 
     if(!ipg_checker_en) begin
       return;
     end
@@ -47,14 +48,19 @@ class eth_ipg_checker extends uvm_component;
         for (int lane = 0; lane < `CTRL_WIDTH; lane++) begin
           bit [7:0] lane_data = data[lane*8 +: 8];
           bit       lane_ctrl = ctrl[lane];
-
+ 
 	  if(lane_ctrl == 1 && lane_data == 8'hfd) begin
 	    term_char_cnt[i]++;
 	  end
 	  else if(lane_ctrl == 1 && lane_data == 8'h07) begin
 	    ipg_cnt[i]++;
+	    frm_ipg_cnt[i]++;
+	  end else if(lane_ctrl == 1 && lane_data == `START_CH && term_char_cnt[i] > 0) begin
+            if(!(frm_ipg_cnt[i] >= 5 && frm_ipg_cnt[i] <= 19))
+	   //   `uvm_error("IPG_CHKR", $sformatf("IPF Count should between 5 and 19, but got ipg is %0d",frm_ipg_cnt[i]) )
+	    frm_ipg_cnt[i] = 0;
 	  end
-
+ 
 	  if(term_char_cnt[i] == `NO_OF_PKTS) begin
 	    frame_start[i] = 0;
 	    `uvm_info("Average IPG", $sformatf("Calculated Average IPG = %0.2f", real'(ipg_cnt[i])/`NO_OF_PKTS), UVM_LOW)
@@ -64,6 +70,6 @@ class eth_ipg_checker extends uvm_component;
       end
       @(negedge v_intf[i].RX_CLK);
     end
-
+ 
   endtask
 endclass

@@ -8,23 +8,34 @@
 //******************************************************************//
 class eth_unicast_frame_test extends eth_base_test;
   `uvm_component_utils(eth_unicast_frame_test)
-  function new (string name = "eth_unicast_frame_test", uvm_component parent = null);
+
+  eth_unicast_frame_seq seq0;
+  eth_unicast_frame_seq seq1;
+
+  function new(string name = "eth_unicast_frame_test", uvm_component parent = null);
     super.new(name, parent);
   endfunction
-  
+
   function void build_phase(uvm_phase phase);
     super.build_phase(phase);
-  endfunction  
-    
-  task run_phase(uvm_phase phase);
-    virtual_seq vseq;
-    phase.raise_objection(this); 
-      vseq = virtual_seq::type_id::create("vseq");
-      vseq.no_of_pkts = `NO_OF_PKTS;
-      vseq.frame_mode = base_virtual_seq::NORMAL_MODE;
-      vseq.start(env_h.vseqr_h);  
-      wait_until_complete();
-    phase.drop_objection(this);
-  endtask  
-endclass
+  endfunction
 
+  task run_phase(uvm_phase phase);
+    phase.raise_objection(this);
+
+    seq0 = eth_unicast_frame_seq::type_id::create("seq0");
+    seq1 = eth_unicast_frame_seq::type_id::create("seq1");
+
+    seq0.no_of_pkts = `NO_OF_PKTS;
+    seq1.no_of_pkts = `NO_OF_PKTS;
+
+    fork
+      seq0.start(env_h.agnt_mac[0].seqr_h);
+      seq1.start(env_h.agnt_mac[1].seqr_h);
+    join
+
+    wait_until_complete();
+    #200;
+    phase.drop_objection(this);
+  endtask
+endclass

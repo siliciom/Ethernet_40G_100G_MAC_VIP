@@ -9,8 +9,18 @@
 // Author: Nitheesh
 //
 //******************************************************************//
-interface eth_ui_interface();
-  
+interface eth_ui_interface ();
+
+
+  // Register access
+  logic        reg_valid;
+  logic        reg_write;
+  logic [31:0] reg_addr;
+  logic [31:0] reg_wdata;
+  logic [31:0] reg_rdata;
+  logic        reg_ready;
+  logic        reg_error;
+
   // Tx Counters
   logic [31:0] tx_good_pkt_count;
   logic [31:0] tx_bad_pkt_count;
@@ -21,6 +31,7 @@ interface eth_ui_interface();
   logic [31:0] tx_drop_count;
   logic [31:0] tx_fragment_count;
   logic [31:0] tx_jumbo_count;
+  logic [31:0] tx_oversized_count;
   logic [31:0] tx_jabber_count;
   logic [31:0] tx_pause_count;
   logic [31:0] tx_vlan_count;
@@ -28,7 +39,7 @@ interface eth_ui_interface();
   logic [31:0] tx_pfc_xon_count;
   logic [31:0] tx_pfc_xoff_count;
   logic [31:0] tx_carrier_ext_count;
-  logic [31:0] tx_pause_xon_count; 
+  logic [31:0] tx_pause_xon_count;
   logic [31:0] tx_pause_xoff_count;
   logic [31:0] tx_control_pkt_count;
   logic [31:0] tx_pfc_xon_prio0_count;
@@ -49,8 +60,8 @@ interface eth_ui_interface();
   logic [31:0] tx_pfc_xoff_prio7_count;
   logic [31:0] tx_idle_fault_seq_cnt;
   logic [31:0] tx_remote_fault_seq_cnt;
-  
-  
+
+
   //Rx Counters
   logic [31:0] rx_good_pkt_count;
   logic [31:0] rx_bad_pkt_count;
@@ -60,6 +71,7 @@ interface eth_ui_interface();
   logic [31:0] rx_runt_count;
   logic [31:0] rx_fragment_count;
   logic [31:0] rx_jumbo_count;
+  logic [31:0] rx_oversized_count;
   logic [31:0] rx_jabber_count;
   logic [31:0] rx_pause_count;
   logic [31:0] rx_vlan_count;
@@ -68,7 +80,7 @@ interface eth_ui_interface();
   logic [31:0] rx_pfc_xon_count;
   logic [31:0] rx_pfc_xoff_count;
   logic [31:0] rx_carrier_ext_count;
-  logic [31:0] rx_pause_xon_count; 
+  logic [31:0] rx_pause_xon_count;
   logic [31:0] rx_pause_xoff_count;
   logic [31:0] rx_control_pkt_count;
   logic [31:0] rx_pfc_xon_prio0_count;
@@ -89,7 +101,7 @@ interface eth_ui_interface();
   logic [31:0] rx_pfc_xoff_prio7_count;
   logic [31:0] rx_idle_fault_seq_cnt;
   logic [31:0] rx_remote_fault_seq_cnt;
-    
+
 endinterface
 
 
