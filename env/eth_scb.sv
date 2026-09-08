@@ -49,7 +49,7 @@ class eth_scb extends uvm_scoreboard;
   // Decodes the source and destination information and stores
   // transactions for future comparison with received packets.
   //----------------------------------------------------------------------
-  function void write_ap_1(eth_seq_item tx_tr);
+function void write_ap_1(eth_seq_item tx_tr);
     int             src_id;
     int             dst_id;
     int             txn_no;
@@ -60,16 +60,15 @@ class eth_scb extends uvm_scoreboard;
 
     src_id = source_address(tx_tr);
     txn_no = tx_tr.tx_count;
-
     val             = ral_model_1.rx_frame_control.get_mirrored_value();
     rx_pfc_ctrl_val = ral_model_1.rx_pfc_control.get_mirrored_value();
 
     `uvm_info("SCB_ERR_B", $sformatf("err_b flag state: %0d", tx_tr.err_b), UVM_LOW)
-
     `uvm_info("SCB_RX_FC",
               $sformatf("rx_frame_control mirrored value = 0x%0h (bit4 = %0b)", val, val[4]),
               UVM_LOW)
-     if(!(mac_addr_arr.exists(tx_tr.sa)))
+
+    if (!(mac_addr_arr.exists(tx_tr.sa)))
       mac_addr_arr[tx_tr.sa] = 1;
 
     if (val[4] == 1'b1) begin
@@ -92,6 +91,9 @@ class eth_scb extends uvm_scoreboard;
                 src_id, tx_tr.fwd_pause, tx_tr.pause_time, txn_no), UVM_LOW)
     end
 
+    // ------------------------------------------------------------------
+    // Broadcast handling
+    // ------------------------------------------------------------------
     if (is_broadcast_addr(tx_tr.da)) begin
       foreach (ai_2[i]) begin
         if (i == src_id) continue;
@@ -103,50 +105,66 @@ class eth_scb extends uvm_scoreboard;
       return;
     end
 
+    // ------------------------------------------------------------------
+    // Multicast handling
+    // ------------------------------------------------------------------
     if (is_multicast_addr(tx_tr)) begin
       foreach (ai_2[i]) begin
         if (i == src_id) continue;
         if (tx_tr.multi_mac_addr[i].exists(tx_tr.da)) begin
-          tx_tr.fwd_pause = val[4];
-          tx_tr.fwd_pause = rx_pfc_ctrl_val[16];  // <-- add this
-          if (tx_tr.ether_type == `MAC_CTRL_ETHERTYPE &&
-              tx_tr.pause_opc != `PAUSE_OPCODE && tx_tr.pause_opc != `PFC_OPCODE) begin
-	                 tx_tr.fwd_pause = val[3];
+
+          // Only set fwd_pause for MAC control frames; leave default (0) for normal data traffic
+          if (tx_tr.ether_type == `MAC_CTRL_ETHERTYPE) begin
+            if (tx_tr.pause_opc == `PAUSE_OPCODE) begin
+              tx_tr.fwd_pause = val[4];               // PAUSE frame -> rx_frame_control bit
+            end
+            else if (tx_tr.pause_opc == `PFC_OPCODE) begin
+              tx_tr.fwd_pause = rx_pfc_ctrl_val[16];  // PFC frame -> rx_pfc_control bit
+            end
+            else begin
+              tx_tr.fwd_pause = val[3];               // other MAC control frame type
+            end
           end
-          $cast(tx_tr_clone_mc, tx_tr.clone());  // <-- clone before storing
+
+          $cast(tx_tr_clone_mc, tx_tr.clone());
           tx_aa[src_id][i][txn_no] = tx_tr_clone_mc;
+
           `uvm_info("SCB_MULTICAST_TX", $sformatf(
                     "Stored MULTICAST TX : TX_MAC[%0d] --> RX_MAC[%0d] | TX_NO=%0d | fwd_pause=%0b",
                     src_id, i, txn_no, tx_aa[src_id][i][txn_no].fwd_pause), UVM_LOW)
-          tx_aa[src_id][i][txn_no] = tx_tr;
-          `uvm_info("SCB_MULTICAST_TX", $sformatf(
-                    "Stored MULTICAST TX : TX_MAC[%0d] --> RX_MAC[%0d] | TX_NO=%0d",
-                    src_id, i, txn_no), UVM_LOW)
         end
       end
       return;
     end
 
+    // ------------------------------------------------------------------
+    // Unicast handling
+    // ------------------------------------------------------------------
     dst_id = destination_address(tx_tr);
 
-    // Store TX transaction
-    tx_tr.fwd_pause = val[4];
-    tx_tr.fwd_pause = rx_pfc_ctrl_val[16];
-    if (tx_tr.ether_type == `MAC_CTRL_ETHERTYPE &&
-        tx_tr.pause_opc != `PAUSE_OPCODE && tx_tr.pause_opc != `PFC_OPCODE) begin
-      tx_tr.fwd_pause = val[3];
+    // Only set fwd_pause for MAC control frames; leave default (0) for normal data traffic
+    if (tx_tr.ether_type == `MAC_CTRL_ETHERTYPE) begin
+      if (tx_tr.pause_opc == `PAUSE_OPCODE) begin
+        tx_tr.fwd_pause = val[4];               // PAUSE frame -> rx_frame_control bit
+      end
+      else if (tx_tr.pause_opc == `PFC_OPCODE) begin
+        tx_tr.fwd_pause = rx_pfc_ctrl_val[16];  // PFC frame -> rx_pfc_control bit
+      end
+      else begin
+        tx_tr.fwd_pause = val[3];               // other MAC control frame type
+      end
     end
-    $cast(tx_tr_clone, tx_tr.clone());
 
+    $cast(tx_tr_clone, tx_tr.clone());
     tx_aa[src_id][dst_id][txn_no] = tx_tr_clone;
 
-   `uvm_info("SCB_TX_1", $sformatf(
+    `uvm_info("SCB_TX_1", $sformatf(
               "Stored TX Packet : TX_MAC[%0d] --> RX_MAC[%0d] | TX_NO=%0d | fwd_pause=%0b | err_b=%0b",
               src_id, dst_id, txn_no,
               tx_aa[src_id][dst_id][txn_no].fwd_pause,
               tx_aa[src_id][dst_id][txn_no].err_b),
               UVM_LOW)
-      endfunction
+endfunction
 
   function bit is_error_pkt(eth_seq_item tr);
     if (tr.err_b)
@@ -825,3 +843,4 @@ class eth_scb extends uvm_scoreboard;
     `COMPARE_COUNTER(tx_oversized_pending,      rx_oversized_pending,      "OVERSIZE_FRAME")
   endfunction
 endclass
+

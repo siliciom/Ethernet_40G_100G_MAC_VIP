@@ -112,7 +112,7 @@ class eth_drv extends uvm_driver #(eth_seq_item);
         pause_hold_q.push_back(tr);
         `uvm_info("PAUSE_HOLD_Q", $sformatf("mac_addr=%h frame queued during pause, size=%0d",
                                             mac_addr, pause_hold_q.size()), UVM_LOW)
-        tx_sem.put(1);
+        //tx_sem.put(1);
       end else begin
         //tx_sem.get(1);
         wait_for_drain_complete(.hold_sem(0));
