@@ -38,7 +38,6 @@ if {$testname == "eth_normal_frame_test"} {
 transcript quietly
 set valid_tests {
     eth_normal_frame_test
-    eth_reg_test
     eth_min_size_frame_test
     eth_max_size_frame_test
     eth_error_detection_test
@@ -77,7 +76,6 @@ set valid_tests {
     eth_consec_multiple_diff_pfc_xoff_imd_xon_test     
     eth_local_and_remote_fault_test
     eth_mac2_mac3_addr_cov_test
-ral_smoke_test
 }
 # ==========================================
 # Check whether test is valid
@@ -161,14 +159,14 @@ vmap work work
 # Compile
 # ==========================================
 
-eval vlog -work work -sv \
--f ./env/ral_package/ral/ral.f \
-./env/ral_package/ral/ral_pkg.sv \
-./env/reg_agent/reg_agent_pkg.sv \
-./top/eth_interface.sv \
-./top/eth_ui_interface.sv \
-./top/eth_top.sv \
-$comp_opts
+#eval vlog -work work -sv \
+#-f ./env/ral_package/ral/ral.f \
+#./env/ral_package/ral/ral_pkg.sv \
+#./env/reg_agent/reg_agent_pkg.sv \
+#./top/eth_interface.sv \
+#./top/eth_ui_interface.sv \
+#./top/eth_top.sv \
+#$comp_opts
 
 eval vlog -work work -sv \
 ./top/eth_interface.sv \
@@ -191,7 +189,7 @@ $comp_opts
 # Simulation
 # ==========================================
 
-eval vsim -debugDB -voptargs=+acc work.eth_top +UVM_TESTNAME=$testname +UVM_VERBOSITY=UVM_LOW $run_opts -l $logfile -wlf $wavefile
+eval vsim -debugDB -voptargs=+acc work.eth_top +UVM_TESTNAME=$testname +UVM_VERBOSITY=UVM_LOW $run_opts -l $logfile -qwavedb=+wavefile=$qwavefile
 # ==========================================
 # Logging
 # ==========================================

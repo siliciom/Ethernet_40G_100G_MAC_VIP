@@ -12,7 +12,6 @@ class eth_local_and_remote_fault_test extends eth_base_test;
   endfunction
 
   task run_phase(uvm_phase phase);
-    virtual_seq vseq;
     foreach (env_h.agnt_mac[i]) begin
       uvm_root::get().set_report_severity_id_override(UVM_ERROR, "TX_CTRL_DATA_MISMATCH",
                                                       UVM_WARNING);

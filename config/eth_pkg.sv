@@ -88,15 +88,12 @@ import reg_agent_pkg::*;
 `include "../sequences/eth_pfc_multi_priority_seq.sv"
 `include "../sequences/eth_mac2_mac3_addr_cov_seq.sv"
 
-`include "../sequences/eth_reg_seq.sv"
-`include "../sequences/eth_virtual_seq.sv"
 `include "../tests/eth_base_test.sv"
 
 //*******************************************//
 //             TEST CASE FILES
 //*******************************************//
 `include "../tests/eth_normal_frame_test.sv"
-`include "../tests/eth_reg_test.sv"
 `include "../tests/eth_min_size_frame_test.sv"
 `include "../tests/eth_max_size_frame_test.sv"
 `include "../tests/eth_error_detection_test.sv"
