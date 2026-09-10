@@ -27,8 +27,8 @@ class eth_double_vlan_payload_padding_test extends eth_base_test;
 
     // Enable double VLAN through RAL
     foreach (env_h.ral_model[i]) begin
-      env_h.ral_model[i].tx_double_vlan_enable.write(status, 32'h1, UVM_FRONTDOOR);
-      env_h.ral_model[i].rx_double_vlan_enable.write(status, 32'h1, UVM_FRONTDOOR);
+      env_h.ral_model[i].tx_double_vlan_enable.write(status, 32'h0, UVM_FRONTDOOR);
+      env_h.ral_model[i].rx_double_vlan_enable.write(status, 32'h0, UVM_FRONTDOOR);
       env_h.ral_model[i].tx_pad_control.write(status, 1, UVM_FRONTDOOR);
     end
 

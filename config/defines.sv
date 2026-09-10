@@ -11,8 +11,11 @@
 //******************************************************************//
 
 `define NO_OF_AGENTS              2
+`define RAL_AGENTS                2
 `define DATA_WIDTH                64
 `define CTRL_WIDTH                8
+`define BITS_PER_BYTE             8
+`define VLAN_PCP                  8
 `define FREQ_IN_MHZ               625
 
 `define START_CH                  8'hFB
@@ -37,9 +40,13 @@
 `define IDLE_BYTES                32'h07_07_07_07
 `define FAULT_PERIOD              500
 `define RESET_PERIOD              5
+`define HALF_CLOCK_DELAY          0.8
 
-`define NUM_LANES                 (`DATA_WIDTH / 8)
-`define NO_OF_PKTS                500
+`define IPG_GAP                  12
+`define MAX_DIC                  7
+`define MIN_IPG                  5
+
+`define NO_OF_PKTS               1000
 
 
 // ------------------------------------------------------------------

@@ -39,9 +39,11 @@ class eth_runt_frame_seq extends base_seq;
         fixed_ethertype_item($urandom_range(0, 45));
         req.padding_en = tx_disable_pad;  // Disable padding to create true runt frames
         req.runt_en = 1;
+        cfg_h.ral_model.tx_pad_control.write(status, 0, UVM_FRONTDOOR);
       end else begin
         randomise_item();
         req.runt_en = 0;
+        cfg_h.ral_model.tx_pad_control.write(status, 1, UVM_FRONTDOOR);
       end
       finish_item(req);
     end

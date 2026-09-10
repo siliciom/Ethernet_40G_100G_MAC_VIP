@@ -32,6 +32,7 @@ class eth_pfc_basic_seq extends base_seq;
     // req.tx_single_vlan_enable = tx_vlan_enable[0];
     //req.rx_single_vlan_enable = rx_vlan_enable[0];
 
+    cfg_h.ral_model.rx_pfc_control.write(status, 32'h0001_0000, UVM_FRONTDOOR);
     repeat (no_of_pkts) begin
       req = eth_seq_item::type_id::create("req");
       start_item(req);

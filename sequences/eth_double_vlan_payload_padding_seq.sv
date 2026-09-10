@@ -41,6 +41,8 @@ class eth_double_vlan_payload_padding_seq extends base_seq;
     if (cfg_h == null)
       `uvm_fatal("CFG_NULL", "eth_cnfg handle is null in eth_double_vlan_payload_padding_seq")
 
+    cfg_h.ral_model.tx_double_vlan_enable.write(status, 1, UVM_FRONTDOOR);
+    cfg_h.ral_model.rx_double_vlan_enable.write(status, 1, UVM_FRONTDOOR);
     //==============================================================
     // READ DOUBLE VLAN REGISTERS ONCE
     //==============================================================

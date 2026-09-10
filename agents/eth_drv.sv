@@ -20,28 +20,27 @@ class eth_drv extends uvm_driver #(eth_seq_item);
   virtual eth_interface v_intf;
   bit [`DATA_WIDTH-1:0] frame_q[$];
   bit [`CRC-1:0] next_crc32;
-  localparam int NUM_LANES = `DATA_WIDTH / 8;
+  localparam int NUM_LANES = `DATA_WIDTH / `BITS_PER_BYTE ;
   int idx;
   //logic [`DATA_WIDTH-1:0] tx_word;
-  int tx_idx;
-  int deficit_cnt = 0;
-  bit frame_in_progress = 0;
+  int deficit_cnt;
+  bit frame_in_progress;
   int PAUSE_QUANTA_CYCLES;
   int fd_lane;
   int pad_within_word;
   int pad_cnt;
   bit [`MAC_ADDR-1:0] mac_addr;
   eth_seq_item pause_hold_q[$];
-  bit pause_drain_in_progress = 0;
+  bit pause_drain_in_progress;
   semaphore tx_sem;
-  int frame_count = 0;
-  bit final_frame = 0;
-  bit tx_busy = 0;
-  bit frame_aborted = 0;
+  int frame_count;
+  bit final_frame;
+  bit tx_busy;
+  bit frame_aborted;
   eth_seq_item pfc_hold_q[8][$];  // per-priority hold queues
   int resumed_pcp_q[$];  // priorities that just went XON, pening drain
   bit drain_in_progress[8];  // per-priority drain-in-flight flag
-  bit current_tx_vlan_en = 0;  // vlan_en of frame currently on the wire
+  bit current_tx_vlan_en;  // vlan_en of frame currently on the wire
   bit [2:0] current_tx_pcp;
   bit [15:0] pause_time;
   bit local_fault_detect;
@@ -142,9 +141,7 @@ class eth_drv extends uvm_driver #(eth_seq_item);
           tx_sem.put(1);
         end
       end
-      `uvm_info("",$sformatf("cccccccccccccccccccccccccccc"),UVM_LOW) 
-      #0.8;
-      `uvm_info("",$sformatf("dddddddddddddddddddddddddddd"),UVM_LOW) 
+      #`HALF_CLOCK_DELAY;
       seq_item_port.item_done();
     end
   endtask
@@ -180,8 +177,7 @@ class eth_drv extends uvm_driver #(eth_seq_item);
       // pause_started=1;
       //statistics::pause_update[mac_addr] = 0;
 
-      `uvm_info("PAUSE_DBG", $sformatf(
-                "mac=%0d PV=%0d cycles=%0d", mac_addr[7:0], prev_pause_value, local_pause_cycles),
+      `uvm_info("PAUSE_DBG", $sformatf( "mac=%0d PV=%0d cycles=%0d", mac_addr[7:0], prev_pause_value, local_pause_cycles),
                 UVM_LOW)
 
       while (local_pause_cycles > 0) begin
@@ -626,15 +622,14 @@ class eth_drv extends uvm_driver #(eth_seq_item);
       if (tr.pfc_frame_en) begin  // logic for pfc frame 
         frame_q[idx++] = tr.priority_en_vector[15:8];
         frame_q[idx++] = tr.priority_en_vector[7:0];
-        for (int i = 0; i < 8; i++) begin
+        for (int i = 0; i < `VLAN_PCP; i++) begin
           frame_q[idx++] = tr.pfc_pause_time[i][15:8];
           frame_q[idx++] = tr.pfc_pause_time[i][7:0];
         end
         //payload
-        for (int i = 0; i < 26; i++) frame_q[idx++] = 8'h00;
+        for (int i = 0; i < `PFC_PAYLOAD_SIZE; i++) frame_q[idx++] = 8'h00;
 
-        `uvm_info(
-            "DRIVING DATA",
+        `uvm_info( "DRIVING DATA",
             $sformatf(
                 "\n\t da=%h\n\t sa=%h\n\t type=%0h\n\t opcode=%0h\n\t priority_en_vector=%0d \n\t pfc_pause_time=%p	\n\t payload=%0d\n\t Frame size=%0d",
                 tr.da, tr.sa, tr.ether_type, tr.pause_opc, tr.priority_en_vector,
@@ -644,7 +639,7 @@ class eth_drv extends uvm_driver #(eth_seq_item);
         //cfg.ral_model.tx_pauseframe_quanta.read( status, pause_time, UVM_FRONTDOOR);
         frame_q[idx++] = tr.pause_time[15:8];
         frame_q[idx++] = tr.pause_time[7:0];
-        for (int i = 0; i < 42; i++) frame_q[idx++] = 0;
+        for (int i = 0; i < `PAUSE_PAYLOAD_SIZE; i++) frame_q[idx++] = 0;
         `uvm_info("DRIVING DATA", $sformatf(
                   "pause_frame_en=%0b,da=%p,sa=%p,type=%0h,opcode=%0h,payload=%0d,Frame size = %0d",
                   tr.pause_frame_en,
@@ -655,7 +650,7 @@ class eth_drv extends uvm_driver #(eth_seq_item);
                   tr.payload.size(),
                   idx
                   ), UVM_LOW)
-      end
+    end
     end else begin
 
       //Payload packing
@@ -664,9 +659,9 @@ class eth_drv extends uvm_driver #(eth_seq_item);
       // bytes for vlan tagged frame
 
       if (tr.tx_double_vlan_en ) 
-	      pad_cnt = 38;
-      else if (tr.tx_single_vlan_enable) pad_cnt = 42;
-      else pad_cnt = 46;
+	   pad_cnt = `DOUBLE_VLAN_PAYLOAD_SIZE;
+      else if (tr.tx_single_vlan_enable) pad_cnt = `PAUSE_PAYLOAD_SIZE;
+      else pad_cnt = `MIN_PAYLOAD_SIZE;
 
       if (tr.payload.size() < pad_cnt && tr.padding_en == 1) begin
         for (int i = tr.payload.size(); i < pad_cnt; i++) frame_q[idx++] = 0;
@@ -688,7 +683,6 @@ class eth_drv extends uvm_driver #(eth_seq_item);
     end
     //  tr.CRC =next_crc32;
     for (int i = 3; i >= 0; i--) frame_q[idx++] = next_crc32[8*i+:8];
-    tx_idx = 0;
     // Print full frame format always
     $display("*****************************ETH_DRIVER***********************************");
     `uvm_info(
@@ -819,12 +813,8 @@ class eth_drv extends uvm_driver #(eth_seq_item);
     // 6. Mandatory one full idle word so next frame's
     //    FB starts at lane0 of a fresh word
     //--------------------------------------------------
-    if (pad_within_word < 5) begin
-      $display("-----------------------------pad_within_word=%0d,natural_idle=%0d",
-               pad_within_word, natural_idle);
+    if (pad_within_word < `MIN_IPG) begin
       natural_idle = pad_within_word + NUM_LANES;
-      $display("-----------------------------pad_within_word=%0d,natural_idle=%0d",
-               pad_within_word, natural_idle);
       extra_words = 1;
     end else begin
       natural_idle = pad_within_word;
@@ -834,9 +824,9 @@ class eth_drv extends uvm_driver #(eth_seq_item);
     //--------------------------------------------------
     // 7. Deficit Idle Count
     //--------------------------------------------------
-    if (natural_idle >= 12) begin
+    if (natural_idle >= `IPG_GAP) begin
 
-      surplus = natural_idle - 12;
+      surplus = natural_idle - `IPG_GAP;
       if (deficit_cnt > 0) begin
         if (surplus >= deficit_cnt) begin
           surplus     = surplus - deficit_cnt;
@@ -847,17 +837,15 @@ class eth_drv extends uvm_driver #(eth_seq_item);
         end
       end
     end else begin
-      shortfall = 12 - natural_idle;
+      shortfall = `IPG_GAP - natural_idle;
 
       deficit_cnt = deficit_cnt + shortfall;
 
-      if (deficit_cnt > 7) begin
+      if (deficit_cnt > `MAX_DIC) begin
         extra_words++;
         deficit_cnt  = deficit_cnt - 8;
         natural_idle = natural_idle + 8;
-        `uvm_info("DIC_OVERFLOW",
-                  $sformatf(" Inserted extra 8-byte idle word DEFICIT_CNT reduced to %0d",
-                            deficit_cnt), UVM_LOW)
+        `uvm_info("DIC_OVERFLOW", $sformatf(" Inserted extra 8-byte idle word DEFICIT_CNT reduced to %0d", deficit_cnt), UVM_LOW)
       end
     end
 
@@ -993,10 +981,7 @@ class eth_drv extends uvm_driver #(eth_seq_item);
 
       end
       word = xlgmii_q[i];
-      //`uvm_info("DRIVE_WORD",
-      //$sformatf("WORD=%0d TXD=%016h TXC=%02h",
-      //         i, word.txd, word.txc),
-      //UVM_LOW)
+
       for (int lane = 0; lane < NUM_LANES; lane++) begin
         // Count only DATA bytes
         if (word.txc[lane] == 0) begin
@@ -1320,413 +1305,91 @@ class eth_drv extends uvm_driver #(eth_seq_item);
   function void report_phase(uvm_phase phase);
     string tx_rx_report;
 
-    tx_rx_report =
-        $sformatf("\n================ COUNTER SUMMARY =================\nMAC_ADDR=%h\n", mac_addr);
+    tx_rx_report = $sformatf("\n================ COUNTER SUMMARY =================\nMAC_ADDR=%h\n", mac_addr);
 
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("\n---------------- MAC %0d : TX COUNTERS ----------------\n", mac_no(mac_addr))
-    };
+    tx_rx_report = {tx_rx_report, $sformatf("\n---------------- MAC %0d : TX COUNTERS ----------------\n", mac_no(mac_addr))};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Good Packets      = %0d\n", statistics::v_uif[mac_addr].tx_good_pkt_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Bad Packets       = %0d\n", statistics::v_uif[mac_addr].tx_bad_pkt_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Unicast           = %0d\n", statistics::v_uif[mac_addr].tx_unicast_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Multicast         = %0d\n", statistics::v_uif[mac_addr].tx_multicast_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Broadcast         = %0d\n", statistics::v_uif[mac_addr].tx_broadcast_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Runt              = %0d\n", statistics::v_uif[mac_addr].tx_runt_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Fragment          = %0d\n", statistics::v_uif[mac_addr].tx_fragment_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Jumbo             = %0d\n", statistics::v_uif[mac_addr].tx_jumbo_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Jabber            = %0d\n", statistics::v_uif[mac_addr].tx_jabber_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Oversize          = %0d\n", statistics::v_uif[mac_addr].tx_oversized_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Pause             = %0d\n", statistics::v_uif[mac_addr].tx_pause_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX VLAN              = %0d\n", statistics::v_uif[mac_addr].tx_vlan_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX IPG Violation     = %0d\n", statistics::v_uif[mac_addr].tx_ipg_violation_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC XON           = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC XOFF          = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Carrier Ext Cnt   = %0d\n", statistics::v_uif[mac_addr].tx_carrier_ext_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Pause XON         = %0d\n", statistics::v_uif[mac_addr].tx_pause_xon_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Pause XOFF        = %0d\n", statistics::v_uif[mac_addr].tx_pause_xoff_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Control Pkt       = %0d\n", statistics::v_uif[mac_addr].tx_control_pkt_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XON_PRIO[0]   = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio0_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XON_PRIO[1]   = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio1_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XON_PRIO[2]   = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio2_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XON_PRIO[3]   = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio3_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XON_PRIO[4]   = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio4_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XON_PRIO[5]   = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio5_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XON_PRIO[6]   = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio6_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XON_PRIO[7]   = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio7_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[0]  = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio0_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[1]  = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio1_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[2]  = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio2_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[3]  = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio3_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[4]  = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio4_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[5]  = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio5_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[6]  = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio6_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX PFC_XOFF_PRIO[7]  = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio7_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Remote Fault Cnt  = %0d\n", statistics::v_uif[mac_addr].tx_remote_fault_seq_cnt)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Idle Fault Cnt    = %0d\n", statistics::v_uif[mac_addr].tx_idle_fault_seq_cnt)};
+    tx_rx_report = {tx_rx_report, $sformatf("TX Drop Count        = %0d\n", statistics::v_uif[mac_addr].tx_drop_count)};
 
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Good Packets          = %0d\n", statistics::v_uif[mac_addr].tx_good_pkt_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Bad Packets           = %0d\n", statistics::v_uif[mac_addr].tx_bad_pkt_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Unicast               = %0d\n", statistics::v_uif[mac_addr].tx_unicast_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Multicast             = %0d\n", statistics::v_uif[mac_addr].tx_multicast_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Broadcast             = %0d\n", statistics::v_uif[mac_addr].tx_broadcast_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Runt                  = %0d\n", statistics::v_uif[mac_addr].tx_runt_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Fragment              = %0d\n", statistics::v_uif[mac_addr].tx_fragment_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Jumbo                 = %0d\n", statistics::v_uif[mac_addr].tx_jumbo_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Jabber                = %0d\n", statistics::v_uif[mac_addr].tx_jabber_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Oversize              = %0d\n", statistics::v_uif[mac_addr].tx_oversized_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Pause                 = %0d\n", statistics::v_uif[mac_addr].tx_pause_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX VLAN                  = %0d\n", statistics::v_uif[mac_addr].tx_vlan_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX IPG Violation         = %0d\n", statistics::v_uif[mac_addr].tx_ipg_violation_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX PFC XON               = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX PFC XOFF              = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX_carrier_ext_cnt       = %0d\n", statistics::v_uif[mac_addr].tx_carrier_ext_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX Pause XON             = %0d\n", statistics::v_uif[mac_addr].tx_pause_xon_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("Tx Pause XOFF            = %0d\n", statistics::v_uif[mac_addr].tx_pause_xoff_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX control pkt           = %0d\n", statistics::v_uif[mac_addr].tx_control_pkt_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XON_PRIO[0]       = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio0_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XON_PRIO[1]       = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio1_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XON_PRIO[2]       = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio2_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XON_PRIO[3]       = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio3_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XON_PRIO[4]       = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio4_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XON_PRIO[5]       = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio5_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XON_PRIO[6]       = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio6_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XON_PRIO[7]       = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xon_prio7_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XOFF_PRIO[0]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio0_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XOFF_PRIO[1]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio1_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XOFF_PRIO[2]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio2_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XOFF_PRIO[3]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio3_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XOFF_PRIO[4]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio4_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XOFF_PRIO[5]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio5_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XOFF_PRIO[6]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio6_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX PFC_XOFF_PRIO[7]      = %0d\n", statistics::v_uif[mac_addr].tx_pfc_xoff_prio7_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX Remote Fault Cnt      = %0d\n", statistics::v_uif[mac_addr].tx_remote_fault_seq_cnt
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "TX Idle Fault Cnt        = %0d\n", statistics::v_uif[mac_addr].tx_idle_fault_seq_cnt
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("TX DROP COUNT            = %0d\n", statistics::v_uif[mac_addr].tx_drop_count)
-    };
-
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("---------------- MAC %0d : RX COUNTERS ----------------\n", mac_no(mac_addr))
-    };
-
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Good Packets          = %0d\n", statistics::v_uif[mac_addr].rx_good_pkt_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Bad Packets           = %0d\n", statistics::v_uif[mac_addr].rx_bad_pkt_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Unicast               = %0d\n", statistics::v_uif[mac_addr].rx_unicast_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Multicast             = %0d\n", statistics::v_uif[mac_addr].rx_multicast_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Broadcast             = %0d\n", statistics::v_uif[mac_addr].rx_broadcast_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Runt                  = %0d\n", statistics::v_uif[mac_addr].rx_runt_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Fragment              = %0d\n", statistics::v_uif[mac_addr].rx_fragment_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Jumbo                 = %0d\n", statistics::v_uif[mac_addr].rx_jumbo_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Jabber                = %0d\n", statistics::v_uif[mac_addr].rx_jabber_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Oversize              = %0d\n", statistics::v_uif[mac_addr].rx_oversized_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Pause                 = %0d\n", statistics::v_uif[mac_addr].rx_pause_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX VLAN                  = %0d\n", statistics::v_uif[mac_addr].rx_vlan_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX PFC XON               = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX PFC XOFF              = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX IPG Violation         = %0d\n", statistics::v_uif[mac_addr].rx_ipg_violation_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX_carrier_ext_cnt       = %0d\n", statistics::v_uif[mac_addr].rx_carrier_ext_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX Pause XON             = %0d\n", statistics::v_uif[mac_addr].rx_pause_xon_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("Rx Pause XOFF            = %0d\n", statistics::v_uif[mac_addr].rx_pause_xoff_count)
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX control pkt           = %0d\n", statistics::v_uif[mac_addr].rx_control_pkt_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XON_PRIO[0]       = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio0_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XON_PRIO[1]       = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio1_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XON_PRIO[2]       = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio2_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XON_PRIO[3]       = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio3_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XON_PRIO[4]       = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio4_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XON_PRIO[5]       = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio5_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XON_PRIO[6]       = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio6_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XON_PRIO[7]       = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio7_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XOFF_PRIO[0]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio0_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XOFF_PRIO[1]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio1_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XOFF_PRIO[2]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio2_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XOFF_PRIO[3]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio3_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XOFF_PRIO[4]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio4_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XOFF_PRIO[5]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio5_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XOFF_PRIO[6]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio6_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX PFC_XOFF_PRIO[7]      = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio7_count
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX Remote Fault Cnt      = %0d\n", statistics::v_uif[mac_addr].rx_remote_fault_seq_cnt
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf(
-          "RX Idle Fault Cnt        = %0d\n", statistics::v_uif[mac_addr].rx_idle_fault_seq_cnt
-      )
-    };
-    tx_rx_report = {
-      tx_rx_report,
-      $sformatf("RX DROP COUNT            = %0d\n", statistics::v_uif[mac_addr].rx_drop_count)
-    };
+    tx_rx_report = {tx_rx_report, $sformatf("---------------- MAC %0d : RX COUNTERS ----------------\n", mac_no(mac_addr))};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Good Packets      = %0d\n", statistics::v_uif[mac_addr].rx_good_pkt_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Bad Packets       = %0d\n", statistics::v_uif[mac_addr].rx_bad_pkt_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Unicast           = %0d\n", statistics::v_uif[mac_addr].rx_unicast_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Multicast         = %0d\n", statistics::v_uif[mac_addr].rx_multicast_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Broadcast         = %0d\n", statistics::v_uif[mac_addr].rx_broadcast_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Runt              = %0d\n", statistics::v_uif[mac_addr].rx_runt_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Fragment          = %0d\n", statistics::v_uif[mac_addr].rx_fragment_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Jumbo             = %0d\n", statistics::v_uif[mac_addr].rx_jumbo_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Jabber            = %0d\n", statistics::v_uif[mac_addr].rx_jabber_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Oversize          = %0d\n", statistics::v_uif[mac_addr].rx_oversized_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Pause             = %0d\n", statistics::v_uif[mac_addr].rx_pause_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX VLAN              = %0d\n", statistics::v_uif[mac_addr].rx_vlan_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC XON           = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC XOFF          = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX IPG Violation     = %0d\n", statistics::v_uif[mac_addr].rx_ipg_violation_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Carrier Ext Cnt   = %0d\n", statistics::v_uif[mac_addr].rx_carrier_ext_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Pause XON         = %0d\n", statistics::v_uif[mac_addr].rx_pause_xon_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Pause XOFF        = %0d\n", statistics::v_uif[mac_addr].rx_pause_xoff_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Control Pkt       = %0d\n", statistics::v_uif[mac_addr].rx_control_pkt_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XON_PRIO[0]   = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio0_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XON_PRIO[1]   = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio1_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XON_PRIO[2]   = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio2_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XON_PRIO[3]   = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio3_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XON_PRIO[4]   = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio4_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XON_PRIO[5]   = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio5_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XON_PRIO[6]   = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio6_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XON_PRIO[7]   = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xon_prio7_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[0]  = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio0_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[1]  = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio1_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[2]  = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio2_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[3]  = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio3_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[4]  = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio4_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[5]  = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio5_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[6]  = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio6_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX PFC_XOFF_PRIO[7]  = %0d\n", statistics::v_uif[mac_addr].rx_pfc_xoff_prio7_count)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Remote Fault Cnt  = %0d\n", statistics::v_uif[mac_addr].rx_remote_fault_seq_cnt)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Idle Fault Cnt    = %0d\n", statistics::v_uif[mac_addr].rx_idle_fault_seq_cnt)};
+    tx_rx_report = {tx_rx_report, $sformatf("RX Drop Count        = %0d\n", statistics::v_uif[mac_addr].rx_drop_count)};
     tx_rx_report = {tx_rx_report, "\n================================================"};
 
     `uvm_info("COUNTER_REPORT", tx_rx_report, UVM_NONE)
   endfunction
-
 
 endclass
 

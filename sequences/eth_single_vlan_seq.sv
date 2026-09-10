@@ -16,6 +16,8 @@ class eth_single_vlan_seq extends base_seq;
 
     if (cfg_h == null) `uvm_fatal("CFG_NULL", "eth_cnfg handle is null in eth_single_vlan_seq")
 
+      cfg_h.ral_model.tx_single_vlan_enable.write(status, 1, UVM_FRONTDOOR);
+      cfg_h.ral_model.rx_single_vlan_enable.write(status, 1, UVM_FRONTDOOR);
     repeat (no_of_pkts) begin
 
       cfg_h.ral_model.tx_single_vlan_enable.read(status, tx_vlan_enable, UVM_FRONTDOOR);

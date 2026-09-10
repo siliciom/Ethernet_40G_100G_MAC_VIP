@@ -29,6 +29,8 @@ class eth_pause_reserved_opcode_test extends eth_base_test;
     wait (env_h.agnt_mac[0].drv_h.v_intf.rst == 1'b1 && env_h.agnt_mac[1].drv_h.v_intf.rst == 1'b1);
     pkt_rand_en = 1;
 
+    env_h.ral_model[0].rx_frame_control.write(status, 0, UVM_FRONTDOOR);
+    env_h.ral_model[1].rx_frame_control.write(status, 0, UVM_FRONTDOOR);
     if (pkt_rand_en == 0) begin
       env_h.ral_model[0].tx_pauseframe_quanta.write(status, $urandom_range(0, 10), UVM_FRONTDOOR);
       env_h.ral_model[1].tx_pauseframe_quanta.write(status, $urandom_range(0, 10), UVM_FRONTDOOR);

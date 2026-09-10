@@ -21,7 +21,13 @@ class eth_min_size_frame_test extends eth_base_test;
   endfunction
 
   task run_phase(uvm_phase phase);
+    uvm_status_e status;
     phase.raise_objection(this);
+    for(int i=0; i<`NO_OF_AGENTS;i++) begin
+      env_h.ral_model[i].tx_frame_minlength.write(status, 32'h40, UVM_FRONTDOOR);
+      env_h.ral_model[i].rx_frame_minlength.write(status, 32'h40, UVM_FRONTDOOR);
+    end
+
     // Create separate sequence objects for each MAC agent
     mac_0 = eth_min_size_seq::type_id::create("mac_0");
     mac_1 = eth_min_size_seq::type_id::create("mac_1");

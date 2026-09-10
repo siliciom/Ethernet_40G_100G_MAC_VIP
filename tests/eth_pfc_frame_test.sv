@@ -32,8 +32,8 @@ class eth_pfc_frame_test extends eth_base_test;
     // ---------------------------------------------------------
     env_h.ral_model[0].tx_single_vlan_enable.write(status, 32'h1, UVM_FRONTDOOR);
     env_h.ral_model[0].rx_single_vlan_enable.write(status, 32'h1, UVM_FRONTDOOR);
-    env_h.ral_model[0].rx_pfc_control.write(status, 32'h0001_0000, UVM_FRONTDOOR);
-    env_h.ral_model[1].rx_pfc_control.write(status, 32'h0001_0000, UVM_FRONTDOOR);
+    env_h.ral_model[0].rx_pfc_control.write(status, 0, UVM_FRONTDOOR);
+    env_h.ral_model[1].rx_pfc_control.write(status, 0, UVM_FRONTDOOR);
     env_h.ral_model[1].tx_single_vlan_enable.write(status, 32'h1, UVM_FRONTDOOR);
     env_h.ral_model[1].rx_single_vlan_enable.write(status, 32'h1, UVM_FRONTDOOR);
 

@@ -23,8 +23,8 @@ class eth_single_vlan_tag_frame_test extends eth_base_test;
     // Enable Single VLAN through RAL
     // ---------------------------------------------------------
     foreach (env_h.ral_model[i]) begin
-      env_h.ral_model[i].tx_single_vlan_enable.write(status, 32'h1, UVM_FRONTDOOR);
-      env_h.ral_model[i].rx_single_vlan_enable.write(status, 32'h1, UVM_FRONTDOOR);
+      env_h.ral_model[i].tx_single_vlan_enable.write(status, 32'h0, UVM_FRONTDOOR);
+      env_h.ral_model[i].rx_single_vlan_enable.write(status, 32'h0, UVM_FRONTDOOR);
     end
 
     // ---------------------------------------------------------

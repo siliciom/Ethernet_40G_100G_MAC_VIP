@@ -33,17 +33,17 @@ class eth_mon extends uvm_monitor;
   virtual eth_interface v_intf;
 
   eth_cnfg cfg;
-  bit [47:0] mac_addr;
-  bit multi_mac_addr[bit [47:0]];
+  bit [`MAC_ADDR-1:0] mac_addr;
+  bit multi_mac_addr[bit [`MAC_ADDR-1:0]];
 
   int rx_pkt_count;
   int tx_pkt_count;
-  localparam int NUM_LANES = `DATA_WIDTH / 8;
+  localparam int NUM_LANES = `DATA_WIDTH / `BITS_PER_BYTE ;
   localparam int PREAMBLE_SFD_BYTES = 8;
   localparam bit [15:0] MAC_CTRL_ETHERTYPE = 16'h8808;
   localparam bit [15:0] PAUSE_OPCODE       = 16'h0001;
   localparam bit [15:0] PFC_OPCODE         = 16'h0101;
-  localparam bit [47:0] PFC_PAUSE_MCAST_DA = 48'h0180_C200_0001;
+  localparam bit [`MAC_ADDR-1:0] PFC_PAUSE_MCAST_DA = 48'h0180_C200_0001;
   localparam int FRAME_DATA_OFFSET         = 8;
   localparam bit [15:0] SVLAN_TPID         = 16'h8100;
   localparam bit [15:0] DVLAN_TPID         = 16'h88A8;
@@ -53,7 +53,7 @@ class eth_mon extends uvm_monitor;
   localparam int OVERSIZED_MIN_LIMIT       = 1519; 
   localparam int OVERSIZED_MAX_LIMIT       = 1535; 
  
-  localparam bit [47:0] BROADCAST_MAC      = 48'hFF_FF_FF_FF_FF_FF;
+  localparam bit [`MAC_ADDR-1:0] BROADCAST_MAC      = 48'hFF_FF_FF_FF_FF_FF;
  
   localparam bit [31:0] CRC_RESIDUE        = 32'hC704DD7B;
   localparam bit [31:0] CRC_INIT           = 32'hFFFF_FFFF;
@@ -63,8 +63,8 @@ class eth_mon extends uvm_monitor;
   bit [7:0] rx_frame_q[$];
   
   // In eth_mon, alongside other per-mac state:
-  bit [15:0] rx_pfc_quanta_history[bit[47:0]][8][$];   // [mac_addr][priority] -> queue of quanta values, in arrival order
-  bit [15:0] tx_pfc_quanta_history[bit[47:0]][8][$];
+  bit [15:0] rx_pfc_quanta_history[bit[`MAC_ADDR-1:0]][8][$];   // [mac_addr][priority] -> queue of quanta values, in arrival order
+  bit [15:0] tx_pfc_quanta_history[bit[`MAC_ADDR-1:0]][8][$];
 
   bit frame_transmission;
   int count;
@@ -118,10 +118,10 @@ class eth_mon extends uvm_monitor;
   //   (to be implemented).
   //=================================================================================
   task rs_framer(
-    input  bit [63:0] data,               // rxd or txd (64 bits = 8 lanes)
-    input  bit [7:0]  ctrl,               // rxc or txc (8 control bits)
+    input  bit [`DATA_WIDTH-1:0] data,               // rxd or txd (64 bits = 8 lanes)
+    input  bit [`CTRL_WIDTH-1:0]  ctrl,               // rxc or txc (8 control bits)
     inout  bit        frame_active,
-    ref    bit [7:0]  frame_q[$],
+    ref    bit [`CTRL_WIDTH-1:0]  frame_q[$],
     output bit        frame_done,
     ref    bit        er_seen,
     ref    bit        inv_ctrl_char_seen,
@@ -386,7 +386,7 @@ endtask
   //   Checks whether the destination MAC address is valid for reception.
   //   Supports unicast, multicast, and broadcast addresses.
   //==============================================================================
-  function automatic bit is_da_valid(eth_seq_item tr, bit [47:0] da);
+  function automatic bit is_da_valid(eth_seq_item tr, bit [`MAC_ADDR-1:0] da);
     if (da == BROADCAST_MAC) return 1;
     if (da == PFC_PAUSE_MCAST_DA) return 1; 
     foreach (tr.mac_addr[i])
@@ -402,7 +402,7 @@ endtask
   // Purpose:
   //   Updates PFC XON/XOFF statistics for the specified priority.
   //============================================================================
-  function automatic void bump_pfc_stat(bit is_tx, bit [47:0] mac, int prio, bit xon);
+  function automatic void bump_pfc_stat(bit is_tx, bit [`MAC_ADDR-1:0] mac, int prio, bit xon);
     if (is_tx) begin
       if (xon) begin
         statistics::tx_pfc_xon_pending[mac]++;
@@ -572,7 +572,6 @@ endtask
         statistics::rx_good_pkt_pending[mac_addr]++;
         addr_classify_rx(tr);
       end
-      `uvm_info("",$sformatf("4444444444444444444444444444 %p",tr.priority_en_vector),UVM_LOW) 
       foreach (tr.priority_en_vector[i]) begin
   `uvm_info("", $sformatf( "priority[%0d] = %0h -- is_tx=%0d -- RAL[%0d]=%0h", i, tr.priority_en_vector[i], is_tx, i, cfg.ral_model.tx_pfc_priority_enable.get_mirrored_value()[i]), UVM_LOW)
         if (tr.priority_en_vector[i]) begin
@@ -677,7 +676,7 @@ endfunction
     eth_seq_item tr;
     bit crc_ok;
     bit da_match;
-    bit [47:0] tx_da;
+    bit [`MAC_ADDR-1:0] tx_da;
     bit invalid_ethertype_tx;
     bit bad_sfd_tx;
     bit bad_preamble_tx;
@@ -948,7 +947,6 @@ endfunction
           end  
            pkt_bad = 1;
         end
-      //  `uvm_info("^^^^^^^^^^^^^^",$sformatf("payload+header=%0d",tr.payload.size()+`HEADER),UVM_LOW)
         else if (tr.payload.size()+`HEADER > OVERSIZED_MAX_LIMIT) begin
           // Beyond the oversized ceiling 
           `uvm_error("TX_OVERSIZED_LIMIT_EXCEEDED", $sformatf("oversized beyond ceiling payload=%0d", tr.payload.size()))
@@ -991,7 +989,7 @@ endfunction
     bit crc_ok;
     bit da_match;
     int min_payload;
-    bit [47:0] rx_da;
+    bit [`MAC_ADDR-1:0] rx_da;
     bit invalid_ethertype;
     bit bad_preamble;
     bit bad_sfd;
@@ -1064,6 +1062,12 @@ endfunction
       //cfg.ral_model.rx_single_vlan_enable.read( status, vlan_reg, UVM_FRONTDOOR);
       rx_vlan_reg = cfg.ral_model.rx_single_vlan_enable.get_mirrored_value();
       rx_vlan = rx_vlan_reg[0];
+      `uvm_info("RX_VLAN_DEBUG", $sformatf( "MAC=%0d RX_REG=%0h RX_VLAN=%0b TR_VLAN_EN=%0b TPID=%04h OUTER_EN=%0b", mac_addr, rx_vlan_reg, rx_vlan,
+    tr.vlan_en,
+    tr.TPID,
+    tr.outer_vlan_en
+  ),
+  UVM_LOW)
       if (rx_vlan)
         tr.vlan_en = 1;
       else
@@ -1086,7 +1090,6 @@ endfunction
      rx_frame_maxlen=cfg.ral_model.tx_frame_maxlength.get_mirrored_value(); 
      rx_frame_minlen=cfg.ral_model.tx_frame_minlength.get_mirrored_value();
      rx_crccheck_control=cfg.ral_model.rx_crccheck_control.get_mirrored_value();
-     $display("77777777777777777777777777777 %0h",rx_crccheck_control );
 
       rx_pkt_count++;
       tr.rx_count = rx_pkt_count;
@@ -1537,24 +1540,12 @@ endfunction
         tr.pause_frame_en     = 0;
         tr.pfc_frame_en       = 1;
         tr.priority_en_vector = {frame_q[idx], frame_q[idx+1]};
-      `uvm_info("",$sformatf("4444444444444444444444444444 %0h",tr.priority_en_vector),UVM_LOW) 
         idx += 2;
         for (int i = 0; i < 8; i++) begin
           tr.pfc_pause_time[i] = {frame_q[idx], frame_q[idx+1]};
           idx += 2;
         end
-	/*if (residue_mode == 0) begin
- 	     if (cfg.tx_crc_control[1])
- 	       actual_payload_size = int'(frame_q.size() - idx - 4);
- 	     else
- 	       actual_payload_size = int'(frame_q.size() - idx);
- 	 end
- 	 else begin
- 	     if (cfg.rx_crccheck_control[1])
- 	       actual_payload_size = int'(frame_q.size() - idx - 4);
- 	     else
- 	       actual_payload_size = int'(frame_q.size() - idx);
- 	  end */
+
         tr.payload = new[`PFC_PAYLOAD_SIZE];
         for (int i = 0; i < `PFC_PAYLOAD_SIZE; i++)
           tr.payload[i] = frame_q[idx++];
@@ -1659,8 +1650,8 @@ endfunction
   // clock cycles.
   //*******************************************************//
   task rx_local_fault_check();
-    bit [63:0] rxd;
-    bit [7:0]  rxc;
+    bit [`DATA_WIDTH-1:0] rxd;
+    bit [`CTRL_WIDTH-1:0]  rxc;
 
       rxd = v_intf.rx_mon_cb.RXD;
       rxc = v_intf.rx_mon_cb.RXC;
@@ -1683,8 +1674,8 @@ endfunction
   // cleared when the fault sequence is no longer present.
   //*******************************************************//
   task rx_remote_fault_check();
-    bit [63:0] rxd;
-    bit [7:0]  rxc;
+    bit [`DATA_WIDTH-1:0] rxd;
+    bit [`CTRL_WIDTH-1:0]  rxc;
   
     rxd = v_intf.rx_mon_cb.RXD;
     rxc = v_intf.rx_mon_cb.RXC;
@@ -1706,8 +1697,8 @@ endfunction
   // detection status accordingly.
   //*******************************************************//
   task tx_fault_check();
-    bit [63:0] txd;
-    bit [7:0]  txc;
+    bit [`DATA_WIDTH-1:0] txd;
+    bit [`CTRL_WIDTH-1:0]  txc;
 
     txd = v_intf.tx_mon_cb.TXD;
     txc = v_intf.tx_mon_cb.TXC;

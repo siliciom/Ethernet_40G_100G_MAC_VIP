@@ -55,6 +55,13 @@ class eth_pause_frame_during_vlan_traffic_test extends eth_base_test;
     cfg_h[1].ral_model.tx_single_vlan_enable.write(status, 32'h0000_0001, UVM_FRONTDOOR);
 
     cfg_h[1].ral_model.rx_single_vlan_enable.write(status, 32'h0000_0001, UVM_FRONTDOOR);
+
+    //==============================================================
+    // Forwarding Pause to the Upper Layers
+    //==============================================================
+    cfg_h[0].ral_model.rx_frame_control.write(status, 32'h0000_0010, UVM_FRONTDOOR);
+
+    cfg_h[1].ral_model.rx_frame_control.write(status, 32'h0000_0010, UVM_FRONTDOOR);
     //==============================================================
     // MAC0
     // VLAN + PAUSE XOFF/XON

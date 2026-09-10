@@ -27,6 +27,7 @@ class eth_env extends uvm_env;
   eth_reg_block                     ral_model    [];
   master_reg_adapter                ral_adapter  [];
   uvm_reg_predictor #(reg_seq_item) ral_predictor[];
+  eth_ral_coverage                  ral_cov      [];
 
   function new(string name = "eth_env", uvm_component parent = null);
     super.new(name, parent);
@@ -35,6 +36,7 @@ class eth_env extends uvm_env;
     ral_model = new[`NO_OF_AGENTS];
     ral_adapter = new[`NO_OF_AGENTS];
     ral_predictor = new[`NO_OF_AGENTS];
+    ral_cov = new[`RAL_AGENTS];
   endfunction
 
   function void build_phase(uvm_phase phase);
@@ -51,9 +53,12 @@ class eth_env extends uvm_env;
 
       ral_adapter[i] = master_reg_adapter::type_id::create($sformatf("ral_adapter_%0d", i), this);
 
-      ral_predictor[i] = uvm_reg_predictor#(reg_seq_item)::type_id::create(
-          $sformatf("ral_predictor_%0d", i), this);
+      ral_predictor[i] = uvm_reg_predictor#(reg_seq_item)::type_id::create( $sformatf("ral_predictor_%0d", i), this);
+
     end
+
+    for(int i=0; i<`RAL_AGENTS; i++)
+      ral_cov[i] = eth_ral_coverage::type_id::create( $sformatf("ral_cov_%0d", i), this);
 
     foreach (agnt_mac[i]) begin
       agnt_mac[i] = eth_agnt::type_id::create($sformatf("agnt_mac[%0d]", i), this);
@@ -93,7 +98,11 @@ class eth_env extends uvm_env;
       ral_predictor[i].adapter = ral_adapter[i];
 
       ral_reg_agent[i].mon.analysis_port.connect(ral_predictor[i].bus_in);
+
     end
+
+    for(int i=0; i<`RAL_AGENTS; i++)
+      ral_reg_agent[i].mon.analysis_port.connect( ral_cov[i].analysis_export);
 
     foreach (agnt_mac[i]) begin
       // Scoreboard Connection

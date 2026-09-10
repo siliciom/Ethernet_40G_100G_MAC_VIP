@@ -1,3 +1,5 @@
+`ifndef ETH_REG_SEQ_ITEM_SV
+`define ETH_REG_SEQ_ITEM_SV
 class reg_seq_item extends uvm_sequence_item;
 
   rand bit [31:0] addr;
@@ -33,3 +35,4 @@ class reg_seq_item extends uvm_sequence_item;
   endfunction
 
 endclass
+`endif
